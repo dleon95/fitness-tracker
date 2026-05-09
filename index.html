@@ -1294,40 +1294,54 @@ ST.showFoodModal=false; render();
 // BOOT — load from Supabase, fall back to localStorage cache
 // ══════════════════════════════════════════════════
 async function boot() {
+try {
 // Show loading screen immediately
 document.getElementById(“app”).innerHTML = ` <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:16px;background:var(--bg)"> <div style="font-family:var(--font-d);font-size:42px;letter-spacing:2px;color:var(--accent)">DIEGO'S</div> <div style="font-family:var(--font-d);font-size:22px;letter-spacing:1px;color:var(--muted)">FITNESS TRACKER</div> <div style="width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin-top:20px"></div> <div style="font-size:13px;color:var(--muted);margin-top:4px">Loading your data…</div> </div>`;
 
-// Try to load from Supabase
-const [wl, bs, nl, air] = await Promise.all([
-sbSelect(“workout_logs”),
-sbSelect(“body_stats”),
-sbSelect(“nutrition_logs”),
-sbSelect(“ai_reports”),
+```
+// Try to load from Supabase (with 8 second timeout)
+const timeout = new Promise(resolve => setTimeout(() => resolve([null,null,null,null]), 8000));
+const fetches = Promise.all([
+  sbSelect("workout_logs"),
+  sbSelect("body_stats"),
+  sbSelect("nutrition_logs"),
+  sbSelect("ai_reports"),
 ]);
+const [wl, bs, nl, air] = await Promise.race([fetches, timeout]);
 
 if (wl !== null) {
-// Supabase returned data — use it and update local cache
-ST.workoutLogs   = wl.map(r => ({…r.exercises ? {id:r.id,dayId:r.day_id,date:r.date,duration:r.duration,exercises:r.exercises} : r}));
-ST.bodyStats     = bs.map(r => ({id:r.id,date:r.date,weight:r.weight,bf:r.bf,waist:r.waist,sleep:r.sleep,notes:r.notes}));
-ST.nutritionLogs = nl.map(r => ({id:r.id,date:r.date,type:r.type,name:r.name,grams:r.grams,cal:r.cal,p:r.p,c:r.c,f:r.f,liters:r.liters}));
-ST.aiReports     = air.map(r => ({id:r.id,date:r.date,report:r.report,snapshot:r.snapshot}));
-// Update local cache
-S.set(“wl”,  ST.workoutLogs);
-S.set(“bs”,  ST.bodyStats);
-S.set(“nl”,  ST.nutritionLogs);
-S.set(“air”, ST.aiReports);
-ST.online = true;
+  ST.workoutLogs   = wl.map(r => ({id:r.id,dayId:r.day_id,date:r.date,duration:r.duration,exercises:r.exercises||[]}));
+  ST.bodyStats     = bs.map(r => ({id:r.id,date:r.date,weight:r.weight,bf:r.bf,waist:r.waist,sleep:r.sleep,notes:r.notes}));
+  ST.nutritionLogs = nl.map(r => ({id:r.id,date:r.date,type:r.type,name:r.name,grams:r.grams,cal:r.cal,p:r.p,c:r.c,f:r.f,liters:r.liters}));
+  ST.aiReports     = air.map(r => ({id:r.id,date:r.date,report:r.report,snapshot:r.snapshot}));
+  S.set("wl",  ST.workoutLogs);
+  S.set("bs",  ST.bodyStats);
+  S.set("nl",  ST.nutritionLogs);
+  S.set("air", ST.aiReports);
+  ST.online = true;
 } else {
-// Offline — use localStorage cache
+  ST.workoutLogs   = S.get("wl", []);
+  ST.bodyStats     = S.get("bs", [{id:"init",date:new Date().toISOString().split("T")[0],weight:170,bf:19,waist:null,notes:"Starting point"}]);
+  ST.nutritionLogs = S.get("nl", []);
+  ST.aiReports     = S.get("air", []);
+  ST.online = false;
+}
+```
+
+} catch(err) {
+// Something crashed — fall back to localStorage and render anyway
 ST.workoutLogs   = S.get(“wl”, []);
 ST.bodyStats     = S.get(“bs”, [{id:“init”,date:new Date().toISOString().split(“T”)[0],weight:170,bf:19,waist:null,notes:“Starting point”}]);
 ST.nutritionLogs = S.get(“nl”, []);
 ST.aiReports     = S.get(“air”, []);
 ST.online = false;
 }
-
 render();
 }
+
+// Global safety net — if anything uncaught crashes the app, still try to render
+window.addEventListener(“error”, () => { try { render(); } catch {} });
+window.addEventListener(“unhandledrejection”, () => { try { render(); } catch {} });
 
 boot();
 </script>
