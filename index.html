@@ -8,15 +8,27 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0a0a0f">
 <title>Diego's Fitness Tracker</title>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<script>
+// Load Chart.js — if it fails, charts just won't render but app still works
+function loadScript(src, cb) {
+  const s = document.createElement('script');
+  s.src = src;
+  s.onload = cb;
+  s.onerror = cb; // continue even if failed
+  document.head.appendChild(s);
+}
+</script>
+
+<script>/* Chart.js loaded dynamically below */</script>
+
 <style>
 :root{
   --bg:#0a0a0f;--bg2:#12121a;--bg3:#1a1a26;--bg4:#22223a;
   --border:#2a2a3a;--text:#f0f0f8;--muted:#6b6b88;--muted2:#9090aa;
   --accent:#4f8ef7;--green:#22c55e;--red:#ef4444;--orange:#f97316;
   --yellow:#eab308;--teal:#06b6d4;--purple:#a855f7;
-  --font-d:'Bebas Neue',sans-serif;--font-b:'DM Sans',sans-serif;
+  --font-d:'Arial Black',Arial,sans-serif;--font-b:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
   --r:14px;--rs:8px;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
@@ -225,6 +237,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--font-b);heigh
 .pill-a{background:rgba(79,142,247,.15);color:var(--accent)}
 .chart-wrap{position:relative;height:190px;margin-top:10px}
 </style>
+
 </head>
 <body>
 <div id="app"></div>
@@ -232,47 +245,8 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--font-b);heigh
 "use strict";
 
 // ══════════════════════════════════════════════════
-// SUPABASE CONFIG
+// STORAGE — localStorage only
 // ══════════════════════════════════════════════════
-const SUPA_URL = “https://cpjwxsanjxafozzdewrd.supabase.co”;
-const SUPA_KEY = “eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwand4c2FuanhhZm96emRld3JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNDMxMTQsImV4cCI6MjA5MzkxOTExNH0.OXgHDAtv40Oy8CaREnGH6t7gX4dhR9Geca8dAWNkrQk”;
-
-// Generic Supabase REST helpers
-async function sbSelect(table) {
-try {
-const r = await fetch(`${SUPA_URL}/rest/v1/${table}?select=*&order=created_at.desc`, {
-headers: { apikey: SUPA_KEY, Authorization: “Bearer “ + SUPA_KEY }
-});
-if (!r.ok) return null;
-return await r.json();
-} catch { return null; }
-}
-
-async function sbUpsert(table, row) {
-try {
-const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
-method: “POST”,
-headers: {
-apikey: SUPA_KEY, Authorization: “Bearer “ + SUPA_KEY,
-“Content-Type”: “application/json”,
-“Prefer”: “resolution=merge-duplicates”
-},
-body: JSON.stringify(row)
-});
-return r.ok;
-} catch { return false; }
-}
-
-async function sbDelete(table, id) {
-try {
-const r = await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, {
-method: “DELETE”,
-headers: { apikey: SUPA_KEY, Authorization: “Bearer “ + SUPA_KEY }
-});
-return r.ok;
-} catch { return false; }
-}
-
 // ══════════════════════════════════════════════════
 // STORAGE — localStorage as cache, Supabase as source of truth
 // ══════════════════════════════════════════════════
@@ -458,109 +432,19 @@ charts: {},
 };
 
 function save() {
-// Always write to localStorage immediately (instant, works offline)
 S.set(“wl”,  ST.workoutLogs);
 S.set(“bs”,  ST.bodyStats);
 S.set(“nl”,  ST.nutritionLogs);
 S.set(“air”, ST.aiReports);
-// Clean up old unversioned keys
 [“wl”,“bs”,“nl”,“air”].forEach(k => { try { if(localStorage.getItem(k)) localStorage.removeItem(k); } catch {} });
 }
-
-// Write a single record to Supabase in the background (non-blocking)
-function syncToCloud(table, row) {
-sbUpsert(table, row).catch(() => {}); // fire and forget
-}
-
-// Called after saving a workout log
-function saveWorkoutLog(log) {
-save();
-syncToCloud(“workout_logs”, {
-id: log.id, day_id: log.dayId, date: log.date,
-duration: log.duration, exercises: log.exercises
-});
-}
-
-// Called after saving a body stat
-function saveBodyStat(stat) {
-save();
-syncToCloud(“body_stats”, {
-id: stat.id, date: stat.date, weight: stat.weight,
-bf: stat.bf, waist: stat.waist, sleep: stat.sleep, notes: stat.notes
-});
-}
-
-// Called after saving a nutrition log entry
-function saveNutritionLog(entry) {
-save();
-syncToCloud(“nutrition_logs”, {
-id: entry.id, date: entry.date, type: entry.type,
-name: entry.name||null, grams: entry.grams||null,
-cal: entry.cal||null, p: entry.p||null, c: entry.c||null,
-f: entry.f||null, liters: entry.liters||null
-});
-}
-
-// Called after updating water
-function saveWaterLog(entry) {
-save();
-syncToCloud(“nutrition_logs”, {
-id: entry.id, date: entry.date, type: “water”,
-liters: entry.liters
-});
-}
-
-// Called after AI report
-function saveAIReport(report) {
-save();
-syncToCloud(“ai_reports”, {
-id: report.id, date: report.date,
-report: report.report, snapshot: report.snapshot
-});
-}
-
-// Delete from Supabase in background
-function deleteFromCloud(table, id) {
-sbDelete(table, id).catch(() => {});
-}
-
-// ══════════════════════════════════════════════════
-// UTILS
-// ══════════════════════════════════════════════════
-function fmtDate(iso) { return new Date(iso+“T12:00:00”).toLocaleDateString(“en-US”,{month:“short”,day:“numeric”,year:“numeric”}); }
-function today()      { return new Date().toISOString().split(“T”)[0]; }
-function getToday()   { return new Date().toLocaleDateString(“en-US”,{weekday:“short”}).toUpperCase().slice(0,3); }
-function weekMon()    { const d=new Date(); d.setDate(d.getDate()-((d.getDay()+6)%7)); d.setHours(0,0,0,0); return d; }
-function weekLogs()   { const m=weekMon(); return ST.workoutLogs.filter(l=>new Date(l.date+“T12:00:00”)>=m); }
-function getLean(w,bf){ return bf ? +(w*(1-bf/100)).toFixed(1) : null; }
-function daysAgo(iso) { return Math.round((Date.now()-new Date(iso+“T12:00:00”))/(86400000)); }
-function weekNum()    { const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+3-(d.getDay()+6)%7); const w1=new Date(d.getFullYear(),0,4); return 1+Math.round(((d-w1)/86400000-3+(w1.getDay()+6)%7)/7); }
-function nutByDate(date) { return ST.nutritionLogs.filter(l=>l.date===date&&l.type===“food”); }
-function nutSum(entries)  { return entries.reduce((a,e)=>({cal:a.cal+(e.cal||0),p:a.p+(e.p||0),c:a.c+(e.c||0),f:a.f+(e.f||0)}),{cal:0,p:0,c:0,f:0}); }
-function todayWater()     { const l=ST.nutritionLogs.find(l=>l.date===today()&&l.type===“water”); return l?l.liters:0; }
-function calcMacros(food, grams) { const g=parseFloat(grams)||0, r=g/100; return {cal:Math.round(food.cal*r), p:Math.round(food.p*r*10)/10, c:Math.round(food.c*r*10)/10, f:Math.round(food.f*r*10)/10}; }
-function searchFoods(q)   { if(!q||q.length<2) return []; const ql=q.toLowerCase(); return FOODS.filter(f=>f.n.toLowerCase().includes(ql)).slice(0,8); }
-function getPRs() {
-const p = {};
-ST.workoutLogs.forEach(log=>(log.exercises||[]).forEach(ex=>(ex.sets||[]).forEach(set=>{
-const w=parseFloat(set.weight); if(!w) return;
-if(!p[ex.name]||w>p[ex.name].weight) p[ex.name]={weight:w,date:log.date,dayId:log.dayId};
-})));
-return Object.entries(p).sort((a,b)=>b[1].weight-a[1].weight);
-}
-function getVolume(log) {
-return (log.exercises||[]).reduce((t,e)=>t+(e.sets||[]).reduce((s,set)=>s+(parseFloat(set.weight)||0)*(parseFloat(set.reps)||0),0),0);
-}
-function proteinStreak() {
-const days=[];
-for(let i=13;i>=0;i–){
-const d=new Date(); d.setDate(d.getDate()-i);
-const ds=d.toISOString().split(“T”)[0];
-const sum=nutSum(nutByDate(ds));
-days.push({date:ds, label:new Date(ds+“T12:00:00”).toLocaleDateString(“en-US”,{weekday:“short”}).slice(0,1), hit:sum.p>=TARGETS.p, logged:sum.p>0});
-}
-return days;
-}
+function saveWorkoutLog(log)    { save(); }
+function saveBodyStat(stat)     { save(); }
+function saveNutritionLog(e)    { save(); }
+function saveWaterLog(e)        { save(); }
+function saveAIReport(r)        { save(); }
+function deleteFromCloud(t, id) {}
+function syncToCloud(t, r)      {}
 
 // ══════════════════════════════════════════════════
 // DATA EXPORT / IMPORT
@@ -758,7 +642,7 @@ const wl=weekLogs(), sum=nutSum(nutByDate(today()));
 const wDelta=latest.weight&&prev.weight?(latest.weight-prev.weight).toFixed(1):null;
 return `
 
-  <div class="ph"><div class="pt">DIEGO'S TRACKER</div><div class="ps">Week ${weekNum()} · ${wl.length}/6 sessions this week · <span style="color:${ST.online!==false?"var(--green)":"var(--orange)"}">${ST.online!==false?"● Cloud sync on":"● Offline mode"}</span></div></div>
+  <div class="ph"><div class="pt">DIEGO'S TRACKER</div><div class="ps">Week ${weekNum()} · ${wl.length}/6 sessions this week</div></div>
   <div class="wbanner"><div class="wname">LET'S GO,<br>DIEGO.</div><div class="wsub">${latest.weight?`${latest.weight} lbs · ${latest.bf}% BF · ${getLean(latest.weight,latest.bf)||"—"} lbs lean mass`:"Tap Body tab to log your first entry"}</div></div>
   <div class="sgrid">
     <div class="sc"><div class="sl">Weight</div><div class="sv" style="color:#4f8ef7">${latest.weight||"—"}</div><div class="su">lbs</div>${wDelta!==null?`<div class="sd ${parseFloat(wDelta)<=0?"dg":"db"}">${parseFloat(wDelta)>0?"+":""}${wDelta} lbs</div>`:""}</div>
@@ -1026,6 +910,7 @@ return `<div class="ph"><div class="pt">PERSONAL RECORDS</div><div class="ps">${
 // CHARTS
 // ══════════════════════════════════════════════════
 function mkLine(id, label, data, labels, color, min, max) {
+if(typeof Chart === “undefined”) return; // Chart.js not loaded, skip
 const el = document.getElementById(id); if(!el) return;
 ST.charts[id] = new Chart(el.getContext(“2d”), {type:“line”,data:{labels,datasets:[{label,data,borderColor:color,backgroundColor:color+“22”,borderWidth:2.5,pointBackgroundColor:color,pointRadius:4,fill:true,tension:.35,spanGaps:true}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:”#6b6b88”,font:{size:9}},grid:{color:”#2a2a3a”}},y:{min,max,ticks:{color:”#6b6b88”,font:{size:9}},grid:{color:”#2a2a3a”}}}}});
 }
@@ -1293,55 +1178,18 @@ ST.showFoodModal=false; render();
 // ══════════════════════════════════════════════════
 // BOOT — load from Supabase, fall back to localStorage cache
 // ══════════════════════════════════════════════════
-async function boot() {
-try {
-// Show loading screen immediately
-document.getElementById(“app”).innerHTML = ` <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:16px;background:var(--bg)"> <div style="font-family:var(--font-d);font-size:42px;letter-spacing:2px;color:var(--accent)">DIEGO'S</div> <div style="font-family:var(--font-d);font-size:22px;letter-spacing:1px;color:var(--muted)">FITNESS TRACKER</div> <div style="width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;margin-top:20px"></div> <div style="font-size:13px;color:var(--muted);margin-top:4px">Loading your data…</div> </div>`;
-
-```
-// Try to load from Supabase (with 8 second timeout)
-const timeout = new Promise(resolve => setTimeout(() => resolve([null,null,null,null]), 8000));
-const fetches = Promise.all([
-  sbSelect("workout_logs"),
-  sbSelect("body_stats"),
-  sbSelect("nutrition_logs"),
-  sbSelect("ai_reports"),
-]);
-const [wl, bs, nl, air] = await Promise.race([fetches, timeout]);
-
-if (wl !== null) {
-  ST.workoutLogs   = wl.map(r => ({id:r.id,dayId:r.day_id,date:r.date,duration:r.duration,exercises:r.exercises||[]}));
-  ST.bodyStats     = bs.map(r => ({id:r.id,date:r.date,weight:r.weight,bf:r.bf,waist:r.waist,sleep:r.sleep,notes:r.notes}));
-  ST.nutritionLogs = nl.map(r => ({id:r.id,date:r.date,type:r.type,name:r.name,grams:r.grams,cal:r.cal,p:r.p,c:r.c,f:r.f,liters:r.liters}));
-  ST.aiReports     = air.map(r => ({id:r.id,date:r.date,report:r.report,snapshot:r.snapshot}));
-  S.set("wl",  ST.workoutLogs);
-  S.set("bs",  ST.bodyStats);
-  S.set("nl",  ST.nutritionLogs);
-  S.set("air", ST.aiReports);
-  ST.online = true;
-} else {
-  ST.workoutLogs   = S.get("wl", []);
-  ST.bodyStats     = S.get("bs", [{id:"init",date:new Date().toISOString().split("T")[0],weight:170,bf:19,waist:null,notes:"Starting point"}]);
-  ST.nutritionLogs = S.get("nl", []);
-  ST.aiReports     = S.get("air", []);
-  ST.online = false;
-}
-```
-
-} catch(err) {
-// Something crashed — fall back to localStorage and render anyway
+function boot() {
 ST.workoutLogs   = S.get(“wl”, []);
-ST.bodyStats     = S.get(“bs”, [{id:“init”,date:new Date().toISOString().split(“T”)[0],weight:170,bf:19,waist:null,notes:“Starting point”}]);
+ST.bodyStats     = S.get(“bs”, [{id:“init”, date:new Date().toISOString().split(“T”)[0], weight:170, bf:19, waist:null, notes:“Starting point”}]);
 ST.nutritionLogs = S.get(“nl”, []);
 ST.aiReports     = S.get(“air”, []);
-ST.online = false;
-}
+ST.online        = false;
 render();
 }
 
-// Global safety net — if anything uncaught crashes the app, still try to render
-window.addEventListener(“error”, () => { try { render(); } catch {} });
-window.addEventListener(“unhandledrejection”, () => { try { render(); } catch {} });
+// Global safety net
+window.addEventListener(“error”, e => { console.error(“App error:”, e); try { render(); } catch {} });
+window.addEventListener(“unhandledrejection”, e => { console.error(“Promise error:”, e); try { render(); } catch {} });
 
 boot();
 </script>
