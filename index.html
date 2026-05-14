@@ -2413,6 +2413,30 @@ function renderCharts() {
 let timerInt = null;
 let timerEndTime = null; // absolute end time so background doesn't drift
 
+// When app comes back into focus (unlock, tab switch back), check timer immediately
+// Keep screen awake while app is open (WakeLock API)
+var _wakeLock = null;
+async function requestWakeLock() {
+  if(!("wakeLock" in navigator)) return;
+  try {
+    _wakeLock = await navigator.wakeLock.request("screen");
+    console.log("Screen wake lock active");
+  } catch(e) {
+    console.log("Wake lock failed:", e);
+  }
+}
+// Re-acquire lock when app comes back to foreground (iOS releases it when backgrounded)
+document.addEventListener("visibilitychange", function() {
+  if(document.visibilityState === "visible") requestWakeLock();
+  if(document.visibilityState === "visible" && timerEndTime && ST.restTimer) {
+    var remaining = Math.round((timerEndTime - Date.now()) / 1000);
+    if(remaining <= 0) {
+      // Timer expired while phone was locked — just cancel silently, don't fire alert
+      stopTimer();
+    }
+  }
+});
+
 function requestNotificationPermission() {
   if("Notification" in window && Notification.permission === "default") {
     Notification.requestPermission();
@@ -2444,19 +2468,19 @@ function getBeepEl() {
 // Unlock audio on every user tap
 function unlockAudio() {
   if(_beepUnlocked) return;
-  var el = getBeepEl();
-  if(!el) return;
-  // Set ambient mode so we don't interrupt music by default
-  if(el.audioSession) {
-    try { el.audioSession.type = "ambient"; } catch(e) {}
-  }
-  el.volume = 0;
-  el.play().then(function(){
-    el.pause();
-    el.currentTime = 0;
-    el.volume = 1;
+  // Use a silent AudioContext buffer to unlock — this does NOT interrupt background music
+  // unlike playing an <audio> element even at volume 0
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var buf = ctx.createBuffer(1, 1, 22050);
+    var src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+    src.stop(0.001);
     _beepUnlocked = true;
-  }).catch(function(){});
+    ctx.close();
+  } catch(e) {}
 }
 
 document.addEventListener("touchstart", unlockAudio, {passive: true});
@@ -3160,6 +3184,7 @@ function loadFromCache() {
 }
 
 function boot() {
+  requestWakeLock();
   showLoader();
 
   // Set a 6 second timeout — if Supabase doesn't respond, use cache
