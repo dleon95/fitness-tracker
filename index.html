@@ -258,14 +258,33 @@ function sbDelete(table, id) {
 
 // ── Supabase Storage (progress photos) ──────────────
 async function sbUploadPhoto(statId, file) {
-  var ext = file.name.split('.').pop() || 'jpg';
-  var path = statId + '.' + ext;
-  var resp = await fetch(SUPA_URL + "/storage/v1/object/progress-photos/" + path, {
-    method: "POST",
-    headers: { "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY, "Content-Type": file.type, "x-upsert": "true" },
-    body: file
-  });
-  return resp.ok ? path : null;
+  // iPhone photos: file.name may be "image.jpg" or similar, type is "image/jpeg"
+  var ext = "jpg";
+  if(file.type === "image/png") ext = "png";
+  else if(file.type === "image/heic" || file.type === "image/heif") ext = "jpg"; // convert heic to jpg label
+  var path = "photo_" + statId + "." + ext;
+  console.log("Uploading photo:", path, "type:", file.type, "size:", file.size);
+  try {
+    var resp = await fetch(SUPA_URL + "/storage/v1/object/progress-photos/" + path, {
+      method: "POST",
+      headers: {
+        "apikey": SUPA_KEY,
+        "Authorization": "Bearer " + SUPA_KEY,
+        "Content-Type": "image/jpeg",  // force jpeg — works for all iPhone photos
+        "x-upsert": "true"
+      },
+      body: file
+    });
+    var respText = await resp.text();
+    console.log("Upload response:", resp.status, respText);
+    if(resp.ok) return path;
+    alert("Photo upload failed: " + resp.status + " " + respText.slice(0,100));
+    return null;
+  } catch(e) {
+    console.error("Upload error:", e);
+    alert("Photo upload error: " + e.message);
+    return null;
+  }
 }
 
 async function sbDeletePhoto(path) {
