@@ -2426,7 +2426,18 @@ var _beepEl = null;
 var _beepUnlocked = false;
 
 function getBeepEl() {
-  if(!_beepEl) _beepEl = document.getElementById("beep-sound");
+  if(!_beepEl) {
+    _beepEl = document.getElementById("beep-sound");
+    if(_beepEl) {
+      // When beep finishes, nudge iOS to resume background audio
+      _beepEl.addEventListener("ended", function() {
+        // Brief silence then resume — iOS sometimes needs this nudge
+        if(_beepEl.audioSession) {
+          try { _beepEl.audioSession.type = "ambient"; } catch(e) {}
+        }
+      });
+    }
+  }
   return _beepEl;
 }
 
@@ -2435,7 +2446,10 @@ function unlockAudio() {
   if(_beepUnlocked) return;
   var el = getBeepEl();
   if(!el) return;
-  // Play at volume 0 to unlock
+  // Set ambient mode so we don't interrupt music by default
+  if(el.audioSession) {
+    try { el.audioSession.type = "ambient"; } catch(e) {}
+  }
   el.volume = 0;
   el.play().then(function(){
     el.pause();
@@ -2454,6 +2468,10 @@ function playBeeps() {
   if(!el) return;
   el.currentTime = 0;
   el.volume = 1;
+  // Tell iOS to mix with background audio (music) rather than interrupting it
+  if(el.audioSession) {
+    try { el.audioSession.type = "transient"; } catch(e) {}
+  }
   el.play().catch(function(e){ console.log("Audio play failed:", e); });
 }
 
