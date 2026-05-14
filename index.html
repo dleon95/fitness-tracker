@@ -431,7 +431,7 @@ const ST = {
   aiReports:     S.get("air", []),
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {},
   restTimer: null,
-  showBodyModal: false, showFoodModal: false,
+  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log",
   expandedLog: null,
   foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""},
   nutTab: "today",
@@ -452,7 +452,7 @@ function saveWorkoutLog(log) {
 }
 function saveBodyStat(stat) {
   save();
-  sbUpsert("body_stats", { id:stat.id, date:stat.date, weight:stat.weight, bf:stat.bf, waist:stat.waist, sleep:stat.sleep, notes:stat.notes });
+  sbUpsert("body_stats", { id:stat.id, date:stat.date, weight:stat.weight, bf:stat.bf, waist:stat.waist, chest:stat.chest, r_arm:stat.r_arm, l_arm:stat.l_arm, r_thigh:stat.r_thigh, l_thigh:stat.l_thigh, hips:stat.hips, sleep:stat.sleep, notes:stat.notes });
 }
 function saveNutritionLog(entry) {
   save();
@@ -484,7 +484,86 @@ function nutByDate(date) { return ST.nutritionLogs.filter(function(l){return l.d
 function nutSum(entries)  { return entries.reduce(function(a,e){return {cal:a.cal+(e.cal||0),p:a.p+(e.p||0),c:a.c+(e.c||0),f:a.f+(e.f||0)};},{cal:0,p:0,c:0,f:0}); }
 function todayWater()     { var l=ST.nutritionLogs.find(function(l){return l.date===today()&&l.type==="water";}); return l?l.liters:0; }
 function calcMacros(food,grams) { var g=parseFloat(grams)||0,r=g/100; return {cal:Math.round(food.cal*r),p:Math.round(food.p*r*10)/10,c:Math.round(food.c*r*10)/10,f:Math.round(food.f*r*10)/10}; }
-function searchFoods(q)   { if(!q||q.length<2) return []; var ql=q.toLowerCase(); return FOODS.filter(function(f){return f.n.toLowerCase().indexOf(ql)>=0;}).slice(0,8); }
+function searchFoods(q)   { if(!q||q.length<1) return []; var ql=q.toLowerCase(); return FOODS.filter(function(f){return f.n.toLowerCase().indexOf(ql)>=0;}).slice(0,8); }
+
+async function lookupFoodWithClaude(query) {
+  ST.foodLookingUp = true;
+  var modalEl = document.querySelector(".modal");
+  if(modalEl) { modalEl.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+
+  try {
+    var resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 300,
+        messages: [{
+          role: "user",
+          content: `Look up the nutrition info for: "${query}"
+
+Determine what TYPE of food this is and respond accordingly:
+
+TYPE A — Raw ingredient (chicken breast, rice, oats, olive oil, etc.):
+Return macros per 100g. Set serving_label to "per 100g" and serving_grams to 100.
+
+TYPE B — Restaurant/fast food item (Big Mac, Wendy's sandwich, Chipotle burrito, etc.):
+Return macros for the WHOLE item as typically served. Set serving_label to the item description (e.g. "1 sandwich", "1 burger") and serving_grams to the approximate weight of that item in grams.
+
+TYPE C — Recipe/dish (lomo saltado, pad thai, chicken tikka masala, etc.):
+Return macros for a typical restaurant/home serving portion. Set serving_label (e.g. "1 serving ~350g") and serving_grams to the typical serving weight.
+
+TYPE D — Combo meal (Wendy's combo, McDonald's meal, etc.):
+Return macros for the full combo as typically ordered. Set serving_label (e.g. "full combo meal") and serving_grams to approximate total weight.
+
+Respond with ONLY a JSON object, no other text:
+{"name":"exact food name","cal":000,"p":00.0,"c":00.0,"f":00.0,"serving_label":"description","serving_grams":000,"type":"A|B|C|D"}
+
+Use real nutritional data. For restaurant items use the actual menu item nutrition if known.`
+        }]
+      })
+    });
+    var json = await resp.json();
+    var text = (json.content && json.content[0] && json.content[0].text) || "";
+    var match = text.match(/\{[\s\S]*\}/);
+    if(match) {
+      var food = JSON.parse(match[0]);
+      if(food.name && food.cal !== undefined && food.p !== undefined) {
+        // For non-raw items, normalize macros to per-100g equivalent for our calcMacros system
+        // but store the serving info so we can pre-fill grams and show the label
+        var sg = food.serving_grams || 100;
+        var food_entry = {
+          n:    food.name,
+          cal:  Math.round((food.cal / sg) * 100),
+          p:    Math.round((food.p  / sg) * 100 * 10) / 10,
+          c:    Math.round((food.c  / sg) * 100 * 10) / 10,
+          f:    Math.round((food.f  / sg) * 100 * 10) / 10,
+          cat:  "Claude Lookup",
+          serving_label: food.serving_label || "per 100g",
+          serving_grams: sg,
+          food_type: food.type || "A"
+        };
+        ST.foodLookingUp = false;
+        ST.foodResults = [food_entry];
+        // Pre-fill grams with the natural serving size
+        ST.pendingServingGrams = sg;
+        var modalEl2 = document.querySelector(".modal");
+        if(modalEl2) {
+          modalEl2.innerHTML = buildFoodModalInner();
+          attachFoodModalInner();
+          var ni = document.getElementById("food-search-input");
+          if(ni){ni.focus();ni.setSelectionRange(ni.value.length,ni.value.length);}
+        }
+        return;
+      }
+    }
+  } catch(e) { console.log("Lookup error:", e); }
+
+  ST.foodLookingUp = false;
+  ST.foodResults = [];
+  var modalEl3 = document.querySelector(".modal");
+  if(modalEl3) { modalEl3.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+}
 function getPRs() {
   var p = {};
   ST.workoutLogs.forEach(function(log){
@@ -613,7 +692,7 @@ function fmtReport(t) {
 // ══════════════════════════════════════════════════
 function render() {
   ST.charts = {};
-  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}`;
+  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}`;
   attachAll();
   renderCharts();
 }
@@ -638,6 +717,7 @@ function updateCSTable() {
     ST.foodSearch = ST.foodEntry.food?.n || "";
     ST.foodResults = [];
     ST.showFoodModal = true;
+    ST.showCheatPanel = false;
     ST.tab = "nutrition";
     render();
   }));
@@ -671,7 +751,7 @@ function updateMacroPreview() {
 // NAV + TIMER
 // ══════════════════════════════════════════════════
 function renderNav() {
-  const tabs = [{id:"dashboard",icon:"⚡",label:"Home"},{id:"workout",icon:"🏋️",label:"Workout"},{id:"nutrition",icon:"🥗",label:"Food"},{id:"cheatsheet",icon:"📋",label:"Foods"},{id:"body",icon:"📊",label:"Body"},{id:"coach",icon:"🤖",label:"Coach"},{id:"history",icon:"📅",label:"Log"},{id:"prs",icon:"🏆",label:"PRs"}];
+  const tabs = [{id:"dashboard",icon:"⚡",label:"Home"},{id:"workout",icon:"🏋️",label:"Workout"},{id:"nutrition",icon:"🥗",label:"Food"},{id:"body",icon:"📊",label:"Body"},{id:"coach",icon:"🤖",label:"Coach"},{id:"history",icon:"📅",label:"Log"}];
   return `<nav class="bnav">${tabs.map(t=>`<button class="nb${ST.tab===t.id?" active":""}" data-nav="${t.id}"><span class="ni">${t.icon}</span><span class="nl">${t.label}</span></button>`).join("")}</nav>`;
 }
 function renderTimer() {
@@ -691,7 +771,6 @@ function renderPage() {
     case "body":       return renderBody();
     case "coach":      return renderCoach();
     case "history":    return renderHistory();
-    case "prs":        return renderPRs();
     default:           return renderDashboard();
   }
 }
@@ -797,7 +876,10 @@ function renderExBlock(ex, idx) {
 function renderNutrition() {
   const todayE=nutByDate(today()), sum=nutSum(todayE), water=todayWater(), filled=Math.round((water/TARGETS.water)*8);
   return `
-  <div class="ph"><div class="pt">NUTRITION</div><div class="ps">Target: ${TARGETS.p}g protein · ${TARGETS.cal} kcal</div></div>
+  <div class="ph" style="display:flex;align-items:flex-end;justify-content:space-between;gap:10px">
+    <div><div class="pt">NUTRITION</div><div class="ps">Target: ${TARGETS.p}g protein · ${TARGETS.cal} kcal</div></div>
+    <button data-action="open-cheat" style="background:rgba(79,142,247,.15);border:1px solid rgba(79,142,247,.3);color:var(--accent);border-radius:var(--rs);padding:8px 12px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--font-b);white-space:nowrap;margin-bottom:14px">📋 Foods</button>
+  </div>
   <div class="tab-pills">${["today","week"].map(t=>`<div class="tab-pill${ST.nutTab===t?" active":""}" data-nut-tab="${t}">${t==="today"?"Today":"This Week"}</div>`).join("")}</div>
   ${ST.nutTab==="today"?renderNutToday(sum,todayE,water,filled):renderNutWeek()}`;
 }
@@ -820,7 +902,7 @@ function renderNutToday(sum, entries, water, filled) {
     <div class="water-track">${Array.from({length:8},(_,i)=>`<div class="water-drop${i<filled?" filled":""}">💧</div>`).join("")}</div>
   </div>
   <div class="card"><div class="ct">Food Log — ${entries.length} items</div>
-    ${entries.length===0?`<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">No food logged yet today.</div>`:entries.map(e=>`<div class="food-item"><div class="food-dot" style="background:${e.p>30?"#22c55e":e.cal>400?"#f97316":"#4f8ef7"}"></div><div class="food-info"><div class="food-name">${e.name}</div><div class="food-macros">${e.grams}g · ${e.cal} kcal · P:${e.p}g C:${e.c}g F:${e.f}g</div></div><button class="food-del" data-del-food="${e.id}">×</button></div>`).join("")}
+    ${entries.length===0?`<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">No food logged yet today.</div>`:entries.map(e=>`<div class="food-item"><div class="food-dot" style="background:${e.p>30?"#22c55e":e.cal>400?"#f97316":"#4f8ef7"}"></div><div class="food-info"><div class="food-name">${e.name}</div><div class="food-macros">${e.grams}g · ${e.cal} kcal · P:${e.p}g C:${e.c}g F:${e.f}g</div></div><button style="background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;padding:4px 8px;font-family:var(--font-b)" data-edit-food="${e.id}">Edit</button><button class="food-del" data-del-food="${e.id}">×</button></div>`).join("")}
   </div>`;
 }
 function renderNutWeek() {
@@ -849,25 +931,67 @@ function renderFoodModal() {
     previewHTML = `<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--green);margin-bottom:8px">Calculated for ${ST.foodEntry.grams}g</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;text-align:center"><div><div style="font-family:var(--font-d);font-size:22px;color:#f97316">${m.cal}</div><div style="font-size:10px;color:var(--muted)">kcal</div></div><div><div style="font-family:var(--font-d);font-size:22px;color:#22c55e">${m.p}</div><div style="font-size:10px;color:var(--muted)">protein</div></div><div><div style="font-family:var(--font-d);font-size:22px;color:#4f8ef7">${m.c}</div><div style="font-size:10px;color:var(--muted)">carbs</div></div><div><div style="font-family:var(--font-d);font-size:22px;color:#eab308">${m.f}</div><div style="font-size:10px;color:var(--muted)">fat</div></div></div>`;
   }
   return `<div class="moverlay" data-action="close-food"><div class="modal" onclick="event.stopPropagation()">
-    <div class="mhandle"></div><div class="mtitle">LOG FOOD</div>
+    <div class="mhandle"></div><div class="mtitle">${ST.editingFood ? "EDIT FOOD" : "LOG FOOD"}</div>
+    ${buildFoodModalInner()}
+  </div></div>`;
+}
+
+function buildFoodModalInner() {
+  var hasFood = !!ST.foodEntry.food;
+  var hasGrams = !!(ST.foodEntry.grams && parseFloat(ST.foodEntry.grams) > 0);
+  var previewHTML = "";
+  if(hasFood && hasGrams) {
+    var m = calcMacros(ST.foodEntry.food, ST.foodEntry.grams);
+    previewHTML = `<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--green);margin-bottom:8px">Calculated for ${ST.foodEntry.grams}g</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;text-align:center"><div><div style="font-family:var(--font-d);font-size:22px;color:#f97316">${m.cal}</div><div style="font-size:10px;color:var(--muted)">kcal</div></div><div><div style="font-family:var(--font-d);font-size:22px;color:#22c55e">${m.p}</div><div style="font-size:10px;color:var(--muted)">protein</div></div><div><div style="font-family:var(--font-d);font-size:22px;color:#4f8ef7">${m.c}</div><div style="font-size:10px;color:var(--muted)">carbs</div></div><div><div style="font-family:var(--font-d);font-size:22px;color:#eab308">${m.f}</div><div style="font-size:10px;color:var(--muted)">fat</div></div></div>`;
+  }
+
+  // Determine what to show below search box
+  var belowSearch = "";
+  if(ST.foodLookingUp) {
+    belowSearch = `<div style="display:flex;align-items:center;gap:10px;padding:12px;background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);border-radius:var(--rs);margin-top:4px"><div style="width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--purple);border-radius:50%;animation:spin 1s linear infinite;flex-shrink:0"></div><div style="font-size:13px;color:var(--purple)">Looking up macros…</div></div>`;
+  } else if(ST.foodResults.length > 0) {
+    belowSearch = `<div class="fsr">${ST.foodResults.map(f=>`<div class="fsr-item" data-sel-food='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat||"",serving_label:f.serving_label||"per 100g",serving_grams:f.serving_grams||100,food_type:f.food_type||"A"}).replace(/'/g,"&#39;")}'>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+        <div class="fsr-name">${f.n}</div>
+        ${f.cat==="Claude Lookup"?`<span style="font-size:10px;background:rgba(168,85,247,.15);color:var(--purple);padding:2px 6px;border-radius:99px;font-weight:700">🤖 AI</span>`:""}
+      </div>
+      <div class="fsr-macros">
+        ${f.cat==="Claude Lookup" && f.food_type!=="A"
+          ? `${f.serving_label}: ${Math.round(f.cal*(f.serving_grams||100)/100)} kcal · P:${Math.round(f.p*(f.serving_grams||100)/100*10)/10}g C:${Math.round(f.c*(f.serving_grams||100)/100*10)/10}g F:${Math.round(f.f*(f.serving_grams||100)/100*10)/10}g`
+          : `${f.cal} kcal · P:${f.p}g C:${f.c}g F:${f.f}g per 100g`
+        }
+      </div>
+    </div>`).join("")}</div>`;
+  } else if(ST.foodSearch && ST.foodSearch.length >= 2) {
+    belowSearch = `<div style="padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);margin-top:4px">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:8px">Not in database — ask Claude to look it up?</div>
+      <button id="ask-claude-btn" class="btn bpur bfull" style="font-size:13px;padding:10px">🤖 Ask Claude</button>
+    </div>`;
+  }
+
+  return `
     <div class="fgrp">
       <label class="flbl">Search Food</label>
-      <input class="finput" type="text" id="food-search-input" placeholder="e.g. chicken breast, rice, salmon…" value="${ST.foodSearch}" autocomplete="off">
-      ${ST.foodResults.length>0?`<div class="fsr">${ST.foodResults.map(f=>`<div class="fsr-item" data-sel-food='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat}).replace(/'/g,"&#39;")}'>  <div class="fsr-name">${f.n}</div><div class="fsr-macros">${f.cal} kcal · P:${f.p}g C:${f.c}g F:${f.f}g per 100g</div></div>`).join("")}</div>`:""}
+      <input class="finput" type="text" id="food-search-input" placeholder="e.g. chicken breast, ceviche, pad thai…" value="${ST.foodSearch}" autocomplete="off">
+      ${belowSearch}
     </div>
     ${hasFood?`
     <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:12px;margin-bottom:14px">
-      <div style="font-weight:700;font-size:14px;margin-bottom:3px">✓ ${ST.foodEntry.food.n}</div>
-      <div style="font-size:12px;color:var(--muted)">${ST.foodEntry.food.cal} kcal · P:${ST.foodEntry.food.p}g · C:${ST.foodEntry.food.c}g · F:${ST.foodEntry.food.f}g per 100g</div>
+      <div style="font-weight:700;font-size:14px;margin-bottom:3px">✓ ${ST.foodEntry.food.n}${ST.foodEntry.food.cat==="Claude Lookup"?' <span style="font-size:10px;background:rgba(168,85,247,.15);color:var(--purple);padding:2px 6px;border-radius:99px;font-weight:700">🤖 AI</span>':""}</div>
+      <div style="font-size:12px;color:var(--muted)">
+        ${ST.foodEntry.food.cat==="Claude Lookup" && ST.foodEntry.food.food_type !== "A"
+          ? `Typical serving: ${ST.foodEntry.food.serving_label} (~${ST.foodEntry.food.serving_grams}g) · ${Math.round(ST.foodEntry.food.cal*(ST.foodEntry.food.serving_grams)/100)} kcal`
+          : `${ST.foodEntry.food.cal} kcal · P:${ST.foodEntry.food.p}g · C:${ST.foodEntry.food.c}g · F:${ST.foodEntry.food.f}g per 100g`
+        }
+      </div>
     </div>
     <div class="fgrp">
-      <label class="flbl">Amount (grams)</label>
-      <input class="finput" type="number" inputmode="decimal" id="food-grams-input" placeholder="e.g. 150" value="${ST.foodEntry.grams}" autocomplete="off">
+      <label class="flbl">${ST.foodEntry.food.cat==="Claude Lookup" && ST.foodEntry.food.food_type!=="A" ? `Amount (grams) — typical serving: ${ST.foodEntry.food.serving_grams}g` : "Amount (grams)"}</label>
+      <input class="finput" type="number" inputmode="decimal" id="food-grams-input" placeholder="${ST.foodEntry.food.serving_grams||150}" value="${ST.foodEntry.grams}" autocomplete="off">
     </div>
     <div id="macro-preview" style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:var(--rs);padding:12px;margin-bottom:14px;${hasGrams?"":"display:none"}">${previewHTML}</div>
-    <button id="save-food-btn" class="btn bp bfull blg" style="${hasGrams?"":"display:none"}">Add to Log</button>
-    `:`<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">Search for a food above.<br>${FOODS.length} foods in database.</div>`}
-  </div></div>`;
+    <button id="save-food-btn" class="btn bp bfull blg" style="${hasGrams?"":"display:none"}">${ST.editingFood?"Update Entry":"Add to Log"}</button>
+    `:`<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">Search for a food above.<br>${FOODS.length} foods in database + Claude AI lookup.</div>`}`;
 }
 
 // ── CHEAT SHEET ────────────────────────────────────
@@ -903,6 +1027,24 @@ function buildCSTableHTML() {
     }).join("");
 }
 
+function renderCheatPanel() {
+  const cats = ["All","Protein","Carbs","Fat","Vegetable","Dairy","Condiment","Supplement","Peruvian","Chinese","Mexican","Italian","American","Thai"];
+  return `<div class="moverlay" data-action="close-cheat">
+    <div class="modal" onclick="event.stopPropagation()" style="max-height:92dvh;padding:16px 0 max(16px,env(safe-area-inset-bottom))">
+      <div class="mhandle"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:0 16px 12px">
+        <div style="font-family:var(--font-d);font-size:24px;letter-spacing:1px">FOOD CHEAT SHEET</div>
+        <button data-action="close-cheat" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:4px">✕</button>
+      </div>
+      <div class="cs-search" style="margin:0 16px 8px"><div class="cs-icon">🔍</div><input id="cs-search-input" type="text" placeholder="Search foods…" value="${ST.csSearch}" autocomplete="off"></div>
+      <div class="cs-filter" style="padding:0 16px 8px">${cats.map(c=>`<div class="cs-pill${ST.csFilter===c?" active":""}" data-cs-filter="${c}">${c}</div>`).join("")}</div>
+      <div style="overflow-y:auto;flex:1">
+        <div class="cs-table" style="margin:0 16px 16px">${buildCSTableHTML()}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
 function renderCheatSheet() {
   const cats = ["All","Protein","Carbs","Fat","Vegetable","Dairy","Condiment","Supplement","Peruvian","Chinese","Mexican","Italian","American","Thai"];
   return `
@@ -924,17 +1066,39 @@ function renderBody() {
     <div class="card"><div class="ct">Body Fat %</div></div>
     <div class="card"><div class="ct">Lean Mass</div></div>`:""}
   <div class="card"><div class="ct">History</div>
-    ${ST.bodyStats.map(s=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)"><div style="flex:1"><div style="font-weight:600;font-size:14px">${fmtDate(s.date)}</div><div style="font-size:12px;color:var(--muted);margin-top:2px">${s.weight?s.weight+" lbs":""} ${s.bf?`· ${s.bf}% BF`:""} ${s.weight&&s.bf?`· ${getLean(s.weight,s.bf)} lbs lean`:""} ${s.waist?`· ${s.waist}"`:""}${s.notes?`<br><span style="font-style:italic">${s.notes}</span>`:""}</div></div><button style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:4px" data-del-stat="${s.id}">×</button></div>`).join("")}
+    ${ST.bodyStats.map(s=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)"><div style="flex:1"><div style="font-weight:600;font-size:14px">${fmtDate(s.date)}</div><div style="font-size:12px;color:var(--muted);margin-top:2px">${s.weight?s.weight+" lbs":""} ${s.bf?`· ${s.bf}% BF`:""} ${s.weight&&s.bf?`· ${getLean(s.weight,s.bf)} lbs lean`:""}${s.waist?` · W:${s.waist}"`:""}${s.chest?` · Ch:${s.chest}"`:""}${s.hips?` · Hips:${s.hips}"`:""}${s.r_arm?` · Arm:${s.r_arm}"`:""}${s.r_thigh?` · Thigh:${s.r_thigh}"`:""}${s.notes?`<br><span style="font-style:italic">${s.notes}</span>`:""}</div></div><button style="background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;padding:4px 8px;font-family:var(--font-b)" data-edit-stat="${s.id}">Edit</button><button style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:4px" data-del-stat="${s.id}">×</button></div>`).join("")}
   </div><div style="height:20px"></div>`;
 }
 function renderBodyModal() {
+  var e = ST.editingStat;
+  var isEdit = !!e;
+  var v = function(field){ return isEdit && e[field] ? e[field] : ''; };
   return `<div class="moverlay" data-action="close-body"><div class="modal" onclick="event.stopPropagation()">
-    <div class="mhandle"></div><div class="mtitle">LOG BODY STATS</div>
-    <div class="fgrp"><label class="flbl">Date</label><input class="finput" type="date" id="stat-date" value="${today()}"></div>
-    <div class="igrid"><div class="fgrp"><label class="flbl">Weight (lbs)</label><input class="finput" type="number" inputmode="decimal" id="stat-weight" placeholder="170"></div><div class="fgrp"><label class="flbl">Body Fat %</label><input class="finput" type="number" inputmode="decimal" id="stat-bf" placeholder="19"></div></div>
-    <div class="igrid"><div class="fgrp"><label class="flbl">Waist (in)</label><input class="finput" type="number" inputmode="decimal" id="stat-waist" placeholder="36"></div><div class="fgrp"><label class="flbl">Sleep (hrs)</label><input class="finput" type="number" inputmode="decimal" id="stat-sleep" placeholder="7.5"></div></div>
-    <div class="fgrp"><label class="flbl">Notes</label><input class="finput" type="text" id="stat-notes" placeholder="How you felt…"></div>
-    <button class="btn bp bfull blg" data-action="save-body">Save Entry</button>
+    <div class="mhandle"></div><div class="mtitle">${isEdit ? "EDIT ENTRY" : "LOG BODY STATS"}</div>
+    <div class="fgrp"><label class="flbl">Date</label><input class="finput" type="date" id="stat-date" value="${isEdit ? e.date : today()}"></div>
+    <div class="igrid">
+      <div class="fgrp"><label class="flbl">Weight (lbs)</label><input class="finput" type="number" inputmode="decimal" id="stat-weight" placeholder="170" value="${v('weight')}"></div>
+      <div class="fgrp"><label class="flbl">Body Fat %</label><input class="finput" type="number" inputmode="decimal" id="stat-bf" placeholder="19" value="${v('bf')}"></div>
+    </div>
+    <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin:4px 0 10px">Measurements (inches) — all optional</div>
+    <div class="igrid">
+      <div class="fgrp"><label class="flbl">Waist</label><input class="finput" type="number" inputmode="decimal" id="stat-waist" placeholder="36" value="${v('waist')}"></div>
+      <div class="fgrp"><label class="flbl">Hips</label><input class="finput" type="number" inputmode="decimal" id="stat-hips" placeholder="38" value="${v('hips')}"></div>
+    </div>
+    <div class="igrid">
+      <div class="fgrp"><label class="flbl">Chest</label><input class="finput" type="number" inputmode="decimal" id="stat-chest" placeholder="40" value="${v('chest')}"></div>
+      <div class="fgrp"><label class="flbl">Right Arm</label><input class="finput" type="number" inputmode="decimal" id="stat-r-arm" placeholder="14" value="${v('r_arm')}"></div>
+    </div>
+    <div class="igrid">
+      <div class="fgrp"><label class="flbl">Left Arm</label><input class="finput" type="number" inputmode="decimal" id="stat-l-arm" placeholder="14" value="${v('l_arm')}"></div>
+      <div class="fgrp"><label class="flbl">Right Thigh</label><input class="finput" type="number" inputmode="decimal" id="stat-r-thigh" placeholder="22" value="${v('r_thigh')}"></div>
+    </div>
+    <div class="igrid">
+      <div class="fgrp"><label class="flbl">Left Thigh</label><input class="finput" type="number" inputmode="decimal" id="stat-l-thigh" placeholder="22" value="${v('l_thigh')}"></div>
+      <div class="fgrp"><label class="flbl">Sleep (hrs)</label><input class="finput" type="number" inputmode="decimal" id="stat-sleep" placeholder="7.5" value="${v('sleep')}"></div>
+    </div>
+    <div class="fgrp"><label class="flbl">Notes</label><input class="finput" type="text" id="stat-notes" placeholder="How you felt…" value="${v('notes')}"></div>
+    <button class="btn bp bfull blg" data-action="save-body">${isEdit ? "Update Entry" : "Save Entry"}</button>
   </div></div>`;
 }
 
@@ -964,18 +1128,27 @@ function renderCoach() {
 
 // ── HISTORY ────────────────────────────────────────
 function renderHistory() {
-  return `<div class="ph"><div class="pt">WORKOUT LOG</div><div class="ps">${ST.workoutLogs.length} sessions logged</div></div><div style="height:12px"></div>
-  ${ST.workoutLogs.length===0?`<div class="empty"><div class="empty-icon">📅</div><div>Log your first workout to see history.</div></div>`:ST.workoutLogs.map(log=>{const plan=PLAN[log.dayId]||{},open=ST.expandedLog===log.id,vol=getVolume(log),sets=(log.exercises||[]).reduce((t,e)=>t+(e.sets||[]).length,0);return`<div class="log-item"><div class="log-hdr" data-exp-log="${log.id}"><div class="log-dot" style="background:${plan.color||"#666"}"></div><div class="log-info"><div class="log-title">${plan.emoji||""} ${plan.title||log.dayId}</div><div class="log-date">${fmtDate(log.date)} · ${log.duration||"—"}</div></div><div style="color:var(--muted);font-size:18px;${open?"transform:rotate(180deg)":""}">⌄</div></div><div class="log-stats"><div class="log-stat">Sets: <strong>${sets}</strong></div><div class="log-stat">Volume: <strong>${vol>0?vol.toLocaleString()+" lbs":"—"}</strong></div><div class="log-stat">Exercises: <strong>${(log.exercises||[]).length}</strong></div></div>${open?`<div class="log-detail">${(log.exercises||[]).map(ex=>`<div class="log-ex"><div class="log-ex-name">${ex.name}</div><div class="log-ex-sets">${(ex.sets||[]).filter(s=>s.done||s.weight||s.reps).map((s,i)=>`Set ${i+1}: ${s.weight?s.weight+"lbs":"—"} × ${s.reps||"—"}`).join(" · ")||"No sets recorded"}</div></div>`).join("")}</div>`:""}</div>`;}).join("")}
+  const prs = getPRs();
+  return `
+  <div class="ph">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div><div class="pt">${ST.historyTab==="prs"?"PERSONAL RECORDS":"WORKOUT LOG"}</div><div class="ps">${ST.historyTab==="prs"?prs.length+" lifts tracked":ST.workoutLogs.length+" sessions logged"}</div></div>
+      <div style="display:flex;gap:6px;margin-bottom:2px">
+        <button data-htab="log" style="padding:7px 14px;border-radius:var(--rs);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${ST.historyTab==="log"?"var(--accent)":"var(--border)"};background:${ST.historyTab==="log"?"rgba(79,142,247,.15)":"var(--bg3)"};color:${ST.historyTab==="log"?"var(--accent)":"var(--muted)"}">📅 Log</button>
+        <button data-htab="prs" style="padding:7px 14px;border-radius:var(--rs);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${ST.historyTab==="prs"?"var(--yellow)":"var(--border)"};background:${ST.historyTab==="prs"?"rgba(234,179,8,.15)":"var(--bg3)"};color:${ST.historyTab==="prs"?"var(--yellow)":"var(--muted)"}">🏆 PRs</button>
+      </div>
+    </div>
+  </div>
+  <div style="height:12px"></div>
+  ${ST.historyTab==="prs" ? `
+    ${prs.length===0?`<div class="empty"><div class="empty-icon">🏆</div><div>Log your first workout to start tracking PRs!</div></div>`:`<div class="card" style="padding:0">${prs.map(([name,pr],i)=>`<div class="pr-item"><div class="pr-rank">${i<3?["🥇","🥈","🥉"][i]:(i+1)}</div><div class="pr-info"><div class="pr-name">${name}</div><div class="pr-date">${fmtDate(pr.date)} · ${PLAN[pr.dayId]?.label||pr.dayId}</div></div><div class="pr-wt"><div class="pr-lbs" style="color:${PLAN[pr.dayId]?.color||"#4f8ef7"}">${pr.weight}</div><div class="pr-unit">lbs</div></div></div>`).join("")}</div>`}
+  ` : `
+    ${ST.workoutLogs.length===0?`<div class="empty"><div class="empty-icon">📅</div><div>Log your first workout to see history.</div></div>`:ST.workoutLogs.map(log=>{const plan=PLAN[log.dayId]||{},open=ST.expandedLog===log.id,vol=getVolume(log),sets=(log.exercises||[]).reduce((t,e)=>t+(e.sets||[]).length,0);return`<div class="log-item"><div class="log-hdr" data-exp-log="${log.id}"><div class="log-dot" style="background:${plan.color||"#666"}"></div><div class="log-info"><div class="log-title">${plan.emoji||""} ${plan.title||log.dayId}</div><div class="log-date">${fmtDate(log.date)} · ${log.duration||"—"}</div></div><div style="color:var(--muted);font-size:18px;${open?"transform:rotate(180deg)":""}">⌄</div></div><div class="log-stats"><div class="log-stat">Sets: <strong>${sets}</strong></div><div class="log-stat">Volume: <strong>${vol>0?vol.toLocaleString()+" lbs":"—"}</strong></div><div class="log-stat">Exercises: <strong>${(log.exercises||[]).length}</strong></div></div>${open?`<div class="log-detail">${(log.exercises||[]).map(ex=>`<div class="log-ex"><div class="log-ex-name">${ex.name}</div><div class="log-ex-sets">${(ex.sets||[]).filter(s=>s.done||s.weight||s.reps).map((s,i)=>`Set ${i+1}: ${s.weight?s.weight+"lbs":"—"} × ${s.reps||"—"}`).join(" · ")||"No sets recorded"}</div></div>`).join("")}</div>`:""}</div>`;}).join("")}
+  `}
   <div style="height:20px"></div>`;
 }
 
-// ── PRs ────────────────────────────────────────────
-function renderPRs() {
-  const prs=getPRs();
-  return `<div class="ph"><div class="pt">PERSONAL RECORDS</div><div class="ps">${prs.length} lifts tracked</div></div><div style="height:12px"></div>
-  ${prs.length===0?`<div class="empty"><div class="empty-icon">🏆</div><div>Log your first workout to start tracking PRs!</div></div>`:`<div class="card" style="padding:0">${prs.map(([name,pr],i)=>`<div class="pr-item"><div class="pr-rank">${i<3?["🥇","🥈","🥉"][i]:(i+1)}</div><div class="pr-info"><div class="pr-name">${name}</div><div class="pr-date">${fmtDate(pr.date)} · ${PLAN[pr.dayId]?.label||pr.dayId}</div></div><div class="pr-wt"><div class="pr-lbs" style="color:${PLAN[pr.dayId]?.color||"#4f8ef7"}">${pr.weight}</div><div class="pr-unit">lbs</div></div></div>`).join("")}</div>`}
-  <div style="height:20px"></div>`;
-}
+// ── PRs are now inside renderHistory via historyTab toggle ──
 
 // ══════════════════════════════════════════════════
 // CHARTS
@@ -1099,12 +1272,40 @@ function attachAll() {
   $("[data-action='stop-timer']")?.addEventListener("click",stopTimer);
 
   // BODY MODAL
-  $("[data-action='open-body']")?.addEventListener("click",()=>{ST.showBodyModal=true;render();});
-  $("[data-action='close-body']")?.addEventListener("click",()=>{ST.showBodyModal=false;render();});
+  $("[data-action='open-body']")?.addEventListener("click",()=>{ST.showBodyModal=true;ST.editingStat=null;render();});
+  $("[data-action='close-body']")?.addEventListener("click",()=>{ST.showBodyModal=false;ST.editingStat=null;render();});
   $("[data-action='save-body']")?.addEventListener("click",()=>{
-    const stat={id:Date.now().toString(),date:$("#stat-date")?.value||today(),weight:parseFloat($("#stat-weight")?.value)||null,bf:parseFloat($("#stat-bf")?.value)||null,waist:parseFloat($("#stat-waist")?.value)||null,sleep:parseFloat($("#stat-sleep")?.value)||null,notes:$("#stat-notes")?.value||""};
-    ST.bodyStats.unshift(stat); saveBodyStat(stat); ST.showBodyModal=false; render();
+    var editing = ST.editingStat;
+    var stat = {
+      id:      editing ? editing.id : Date.now().toString(),
+      date:    $("#stat-date")?.value || today(),
+      weight:  parseFloat($("#stat-weight")?.value)||null,
+      bf:      parseFloat($("#stat-bf")?.value)||null,
+      waist:   parseFloat($("#stat-waist")?.value)||null,
+      hips:    parseFloat($("#stat-hips")?.value)||null,
+      chest:   parseFloat($("#stat-chest")?.value)||null,
+      r_arm:   parseFloat($("#stat-r-arm")?.value)||null,
+      l_arm:   parseFloat($("#stat-l-arm")?.value)||null,
+      r_thigh: parseFloat($("#stat-r-thigh")?.value)||null,
+      l_thigh: parseFloat($("#stat-l-thigh")?.value)||null,
+      sleep:   parseFloat($("#stat-sleep")?.value)||null,
+      notes:   $("#stat-notes")?.value||""
+    };
+    if(editing) {
+      // Replace existing entry
+      var idx = ST.bodyStats.findIndex(function(s){return s.id===editing.id;});
+      if(idx>=0) ST.bodyStats[idx] = stat;
+    } else {
+      ST.bodyStats.unshift(stat);
+    }
+    saveBodyStat(stat); ST.showBodyModal=false; ST.editingStat=null; render();
   });
+  $$("[data-edit-stat]").forEach(el=>el.addEventListener("click",()=>{
+    var id = el.dataset.editStat;
+    ST.editingStat = ST.bodyStats.find(function(s){return s.id===id;}) || null;
+    ST.showBodyModal = true;
+    render();
+  }));
   $$("[data-del-stat]").forEach(el=>el.addEventListener("click",()=>{
     const id=el.dataset.delStat;
     ST.bodyStats=ST.bodyStats.filter(s=>s.id!==id); save(); deleteFromCloud("body_stats",id); render();
@@ -1112,24 +1313,12 @@ function attachAll() {
 
   // FOOD MODAL
   $("[data-action='open-food']")?.addEventListener("click",()=>{
-    ST.showFoodModal=true; ST.foodSearch=""; ST.foodResults=[]; ST.foodEntry={food:null,grams:""}; render();
+    ST.showFoodModal=true; ST.foodSearch=""; ST.foodResults=[]; ST.foodEntry={food:null,grams:""}; ST.editingFood=null; render();
     setTimeout(()=>document.getElementById("food-search-input")?.focus(),100);
   });
-  $("[data-action='close-food']")?.addEventListener("click",()=>{ST.showFoodModal=false;render();});
+  $("[data-action='close-food']")?.addEventListener("click",()=>{ST.showFoodModal=false;ST.editingFood=null;render();});
 
-  // Food search — rebuild results without rebuilding modal
-  const fsEl=document.getElementById("food-search-input");
-  if(fsEl) {
-    fsEl.addEventListener("input",()=>{
-      ST.foodSearch=fsEl.value;
-      ST.foodResults=searchFoods(fsEl.value);
-      // Only re-render the modal — the page is behind it so page scroll is unaffected
-      const modalSlot=document.querySelector(".moverlay");
-      if(modalSlot) { modalSlot.outerHTML=renderFoodModal(); attachFoodModal(); }
-    });
-  }
-
-  attachFoodModal();
+  attachFoodModalInner();
 
   // WATER
   $$("[data-water]").forEach(el=>el.addEventListener("click",()=>addWater(parseFloat(el.dataset.water))));
@@ -1169,55 +1358,136 @@ function attachAll() {
   $("[data-action='run-ai']")?.addEventListener("click",runAI);
   $$("[data-exp-report]").forEach(el=>el.addEventListener("click",()=>{ST.aiExpandedReport=ST.aiExpandedReport===el.dataset.expReport?null:el.dataset.expReport;render();}));
 
-  // FOOD DELETE (event delegation — food items are in dynamic list)
+  // FOOD DELETE + EDIT (event delegation — food items are in dynamic list)
   document.getElementById("app").addEventListener("click", e => {
-    const btn = e.target.closest("[data-del-food]");
-    if(!btn) return;
-    const id = btn.dataset.delFood;
-    ST.nutritionLogs = ST.nutritionLogs.filter(l => l.id !== id);
-    save(); deleteFromCloud("nutrition_logs", id); render();
+    // Delete
+    const delBtn = e.target.closest("[data-del-food]");
+    if(delBtn) {
+      var id = delBtn.dataset.delFood;
+      ST.nutritionLogs = ST.nutritionLogs.filter(function(l){return l.id!==id;});
+      save(); deleteFromCloud("nutrition_logs", id); render();
+      return;
+    }
+    // Edit
+    const editBtn = e.target.closest("[data-edit-food]");
+    if(editBtn) {
+      var fid = editBtn.dataset.editFood;
+      var entry = ST.nutritionLogs.find(function(l){return l.id===fid;});
+      if(!entry) return;
+      ST.editingFood = entry;
+      ST.foodEntry = {
+        food: {n:entry.name, cal:Math.round(entry.cal/(entry.grams/100)), p:Math.round(entry.p/(entry.grams/100)*10)/10, c:Math.round(entry.c/(entry.grams/100)*10)/10, f:Math.round(entry.f/(entry.grams/100)*10)/10, cat:""},
+        grams: String(entry.grams)
+      };
+      ST.foodSearch = entry.name;
+      ST.foodResults = [];
+      ST.showFoodModal = true;
+      render();
+      return;
+    }
+    // Edit body stat
+    const editStatBtn = e.target.closest("[data-edit-stat]");
+    if(editStatBtn) {
+      var sid = editStatBtn.dataset.editStat;
+      ST.editingStat = ST.bodyStats.find(function(s){return s.id===sid;}) || null;
+      ST.showBodyModal = true;
+      render();
+    }
   });
+
+  // CHEAT SHEET PANEL
+  $("[data-action='open-cheat']")?.addEventListener("click",()=>{ST.showCheatPanel=true;render();});
+  $("[data-action='close-cheat']")?.addEventListener("click",()=>{ST.showCheatPanel=false;render();});
+
+  // HISTORY TAB TOGGLE (Log / PRs)
+  $$("[data-htab]").forEach(el=>el.addEventListener("click",()=>{ST.historyTab=el.dataset.htab;render();}));
 
   // EXPORT / IMPORT
   $("[data-action='export']")?.addEventListener("click",exportData);
   document.getElementById("import-file")?.addEventListener("change",e=>{if(e.target.files[0])importData(e.target.files[0]);});
 }
 
-// Attach listeners specific to the food modal (called after modal re-renders)
-function attachFoodModal() {
-  const $ = sel => document.querySelector(sel);
-  const $$ = sel => document.querySelectorAll(sel);
+// Attach listeners inside the food modal .modal div
+function attachFoodModalInner() {
+  var $ = function(sel){return document.querySelector(sel);};
+  var $$ = function(sel){return document.querySelectorAll(sel);};
 
-  // Select food from search results
-  $$("[data-sel-food]").forEach(el=>el.addEventListener("click",()=>{
-    try { ST.foodEntry.food=JSON.parse(el.dataset.selFood.replace(/&#39;/g,"'")); } catch {}
-    ST.foodResults=[]; ST.foodSearch=ST.foodEntry.food.n;
-    ST.foodEntry.grams="";
-    const modalSlot=document.querySelector(".moverlay");
-    if(modalSlot) { modalSlot.outerHTML=renderFoodModal(); attachFoodModal(); }
-    setTimeout(()=>document.getElementById("food-grams-input")?.focus(),100);
-  }));
-
-  // Grams input — ONLY update the preview div, never re-render anything else
-  const gramsEl=document.getElementById("food-grams-input");
-  if(gramsEl) {
-    gramsEl.addEventListener("input",()=>{
-      ST.foodEntry.grams=gramsEl.value;
-      updateMacroPreview(); // surgical update only
+  // Search input — must be re-attached every time modal inner rebuilds
+  var fsEl = document.getElementById("food-search-input");
+  if(fsEl) {
+    fsEl.addEventListener("input", function() {
+      ST.foodSearch = fsEl.value;
+      ST.foodResults = searchFoods(fsEl.value);
+      var modalEl = document.querySelector(".modal");
+      if(modalEl) {
+        modalEl.innerHTML = buildFoodModalInner();
+        attachFoodModalInner();
+        var newInput = document.getElementById("food-search-input");
+        if(newInput) { newInput.focus(); newInput.setSelectionRange(newInput.value.length, newInput.value.length); }
+      }
     });
   }
 
-  // Save food button
-  $("[id='save-food-btn']")?.addEventListener("click",()=>{
-    const g=document.getElementById("food-grams-input")?.value;
-    if(g) ST.foodEntry.grams=g;
-    if(!ST.foodEntry.food||!ST.foodEntry.grams) return;
-    const m=calcMacros(ST.foodEntry.food,ST.foodEntry.grams);
-    const entry={id:Date.now().toString(),date:today(),type:"food",name:ST.foodEntry.food.n,grams:parseFloat(ST.foodEntry.grams),...m};
-    ST.nutritionLogs.unshift(entry);
-    saveNutritionLog(entry);
-    ST.showFoodModal=false; render();
+  // Ask Claude button
+  var askBtn = document.getElementById("ask-claude-btn");
+  if(askBtn) {
+    askBtn.addEventListener("click", function() {
+      lookupFoodWithClaude(ST.foodSearch);
+    });
+  }
+
+  // Select food from search results
+  $$("[data-sel-food]").forEach(function(el){
+    el.addEventListener("click",function(){
+      try { ST.foodEntry.food=JSON.parse(el.dataset.selFood.replace(/&#39;/g,"'")); } catch {}
+      ST.foodResults=[]; ST.foodSearch=ST.foodEntry.food.n;
+      // Pre-fill grams with natural serving size for Claude lookups
+      if(ST.foodEntry.food.cat==="Claude Lookup" && ST.foodEntry.food.serving_grams && ST.foodEntry.food.food_type !== "A") {
+        ST.foodEntry.grams = String(ST.foodEntry.food.serving_grams);
+      } else if(!ST.editingFood) {
+        ST.foodEntry.grams="";
+      }
+      var modalEl=document.querySelector(".modal");
+      if(modalEl){ modalEl.innerHTML=buildFoodModalInner(); attachFoodModalInner(); }
+      // Focus grams input if already pre-filled, otherwise search
+      setTimeout(function(){
+        var gi = document.getElementById("food-grams-input");
+        if(gi) gi.focus();
+      },100);
+    });
   });
+
+  // Grams input — only update preview, never re-render
+  var gramsEl=document.getElementById("food-grams-input");
+  if(gramsEl) {
+    gramsEl.addEventListener("input",function(){
+      ST.foodEntry.grams=gramsEl.value;
+      updateMacroPreview();
+    });
+  }
+
+  // Save / Update button
+  var saveBtn=document.getElementById("save-food-btn");
+  if(saveBtn) {
+    saveBtn.addEventListener("click",function(){
+      var g=document.getElementById("food-grams-input")?.value;
+      if(g) ST.foodEntry.grams=g;
+      if(!ST.foodEntry.food||!ST.foodEntry.grams) return;
+      var m=calcMacros(ST.foodEntry.food,ST.foodEntry.grams);
+      if(ST.editingFood) {
+        var updated={id:ST.editingFood.id,date:ST.editingFood.date,type:"food",name:ST.foodEntry.food.n,grams:parseFloat(ST.foodEntry.grams),cal:m.cal,p:m.p,c:m.c,f:m.f};
+        var idx=ST.nutritionLogs.findIndex(function(l){return l.id===ST.editingFood.id;});
+        if(idx>=0) ST.nutritionLogs[idx]=updated;
+        saveNutritionLog(updated);
+        ST.editingFood=null;
+      } else {
+        var entry={id:Date.now().toString(),date:today(),type:"food",name:ST.foodEntry.food.n,grams:parseFloat(ST.foodEntry.grams),cal:m.cal,p:m.p,c:m.c,f:m.f};
+        ST.nutritionLogs.unshift(entry);
+        saveNutritionLog(entry);
+      }
+      ST.showFoodModal=false; render();
+    });
+  }
 }
 
 // ══════════════════════════════════════════════════
@@ -1255,7 +1525,7 @@ function boot() {
 
     if(wl !== null) {
       ST.workoutLogs   = wl.map(function(r)  { return {id:r.id, dayId:r.day_id, date:r.date, duration:r.duration, exercises:r.exercises||[]}; });
-      ST.bodyStats     = bs.map(function(r)  { return {id:r.id, date:r.date, weight:r.weight, bf:r.bf, waist:r.waist, sleep:r.sleep, notes:r.notes}; });
+      ST.bodyStats     = bs.map(function(r)  { return {id:r.id, date:r.date, weight:r.weight, bf:r.bf, waist:r.waist, chest:r.chest, hips:r.hips, r_arm:r.r_arm, l_arm:r.l_arm, r_thigh:r.r_thigh, l_thigh:r.l_thigh, sleep:r.sleep, notes:r.notes}; });
       ST.nutritionLogs = nl.map(function(r)  { return {id:r.id, date:r.date, type:r.type, name:r.name, grams:r.grams, cal:r.cal, p:r.p, c:r.c, f:r.f, liters:r.liters}; });
       ST.aiReports     = air.map(function(r) { return {id:r.id, date:r.date, report:r.report, snapshot:r.snapshot}; });
       // Update local cache
