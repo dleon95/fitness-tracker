@@ -537,7 +537,10 @@ Use real nutritional data. For restaurant items use the actual menu item nutriti
         }]
       })
     });
-    var json = await resp.json();
+    var rawText = await resp.text();
+    console.log("Worker status:", resp.status, "Body:", rawText.slice(0,300));
+    if(!resp.ok) { alert("Worker error " + resp.status + ": " + rawText.slice(0,200)); throw new Error("Worker error"); }
+    var json = JSON.parse(rawText);
     var text = (json.content && json.content[0] && json.content[0].text) || "";
     var match = text.match(/\{[\s\S]*\}/);
     if(match) {
