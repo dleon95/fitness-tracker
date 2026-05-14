@@ -2414,20 +2414,10 @@ let timerInt = null;
 let timerEndTime = null; // absolute end time so background doesn't drift
 
 // When app comes back into focus (unlock, tab switch back), check timer immediately
-// Keep screen awake while app is open (WakeLock API)
-var _wakeLock = null;
-async function requestWakeLock() {
-  if(!("wakeLock" in navigator)) return;
-  try {
-    _wakeLock = await navigator.wakeLock.request("screen");
-    console.log("Screen wake lock active");
-  } catch(e) {
-    console.log("Wake lock failed:", e);
-  }
-}
+// WakeLock blocked by GitHub Pages permissions policy — users should set
+// Settings → Display & Brightness → Auto-Lock → Never while working out
 // Re-acquire lock when app comes back to foreground (iOS releases it when backgrounded)
 document.addEventListener("visibilitychange", function() {
-  if(document.visibilityState === "visible") requestWakeLock();
   if(document.visibilityState === "visible" && timerEndTime && ST.restTimer) {
     var remaining = Math.round((timerEndTime - Date.now()) / 1000);
     if(remaining <= 0) {
@@ -3184,7 +3174,6 @@ function loadFromCache() {
 }
 
 function boot() {
-  requestWakeLock();
   showLoader();
 
   // Set a 6 second timeout — if Supabase doesn't respond, use cache
