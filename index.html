@@ -256,6 +256,29 @@ function sbDelete(table, id) {
   }).then(function(r) { return r.ok; }).catch(function() { return false; });
 }
 
+// ── Supabase Storage (progress photos) ──────────────
+async function sbUploadPhoto(statId, file) {
+  var ext = file.name.split('.').pop() || 'jpg';
+  var path = statId + '.' + ext;
+  var resp = await fetch(SUPA_URL + "/storage/v1/object/progress-photos/" + path, {
+    method: "POST",
+    headers: { "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY, "Content-Type": file.type, "x-upsert": "true" },
+    body: file
+  });
+  return resp.ok ? path : null;
+}
+
+async function sbDeletePhoto(path) {
+  await fetch(SUPA_URL + "/storage/v1/object/progress-photos/" + path, {
+    method: "DELETE",
+    headers: { "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY }
+  });
+}
+
+function sbPhotoUrl(path) {
+  return SUPA_URL + "/storage/v1/object/public/progress-photos/" + path;
+}
+
 // ══════════════════════════════════════════════════
 // STORAGE — localStorage as cache, Supabase as source of truth
 // ══════════════════════════════════════════════════
@@ -480,7 +503,7 @@ const ST = {
   customFoods:   S.get("cf", []),  // foods saved from Claude lookups
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {},
   restTimer: null,
-  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log",
+  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null,
   expandedLog: null,
   foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""},
   nutTab: "today",
@@ -509,7 +532,7 @@ function saveWorkoutLog(log) {
 }
 function saveBodyStat(stat) {
   save();
-  sbUpsert("body_stats", { id:stat.id, date:stat.date, weight:stat.weight, bf:stat.bf, waist:stat.waist, chest:stat.chest, r_arm:stat.r_arm, l_arm:stat.l_arm, r_thigh:stat.r_thigh, l_thigh:stat.l_thigh, hips:stat.hips, sleep:stat.sleep, notes:stat.notes, created_at:clientTs() });
+  sbUpsert("body_stats", { id:stat.id, date:stat.date, weight:stat.weight, bf:stat.bf, waist:stat.waist, chest:stat.chest, r_arm:stat.r_arm, l_arm:stat.l_arm, r_thigh:stat.r_thigh, l_thigh:stat.l_thigh, hips:stat.hips, sleep:stat.sleep, notes:stat.notes, photo_path:stat.photo_path||null, created_at:clientTs() });
 }
 function saveNutritionLog(entry) {
   save();
@@ -1318,13 +1341,24 @@ function renderBody() {
   return `
   <div class="ph"><div class="pt">BODY STATS</div><div class="ps">Track weight, body fat & measurements</div></div>
   <div style="padding:12px 16px 0"><button class="btn bp bfull" data-action="open-body">+ Log Today's Stats</button></div>
-  ${stats.length>1?`
-    <div class="card" style="margin-top:12px"><div class="ct">Weight</div><div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">Charts coming soon</div></div>
-    <div class="card"><div class="ct">Body Fat %</div></div>
-    <div class="card"><div class="ct">Lean Mass</div></div>`:""}
   <div class="card"><div class="ct">History</div>
-    ${ST.bodyStats.map(s=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)"><div style="flex:1"><div style="font-weight:600;font-size:14px">${fmtDate(s.date)}</div><div style="font-size:12px;color:var(--muted);margin-top:2px">${s.weight?s.weight+" lbs":""} ${s.bf?`· ${s.bf}% BF`:""} ${s.weight&&s.bf?`· ${getLean(s.weight,s.bf)} lbs lean`:""}${s.waist?` · W:${s.waist}"`:""}${s.chest?` · Ch:${s.chest}"`:""}${s.hips?` · Hips:${s.hips}"`:""}${s.r_arm?` · Arm:${s.r_arm}"`:""}${s.r_thigh?` · Thigh:${s.r_thigh}"`:""}${s.notes?`<br><span style="font-style:italic">${s.notes}</span>`:""}</div></div><button style="background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;padding:4px 8px;font-family:var(--font-b)" data-edit-stat="${s.id}">Edit</button><button style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:4px" data-del-stat="${s.id}">×</button></div>`).join("")}
-  </div><div style="height:20px"></div>`;
+    ${ST.bodyStats.length===0?'<div class="empty"><div class="empty-icon">📊</div><div>No stats yet.</div></div>':
+      ST.bodyStats.map(s=>{
+        const hasPhoto = !!s.photo_path;
+        const isUploading = ST.photoUploading === s.id;
+        return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">' +
+          '<div style="display:flex;align-items:center;gap:12px">' +
+          (hasPhoto ?
+            `<div data-view-photo="${s.photo_path}" style="width:52px;height:52px;border-radius:var(--rs);overflow:hidden;flex-shrink:0;cursor:pointer;border:2px solid var(--accent)"><img src="${sbPhotoUrl(s.photo_path)}" style="width:100%;height:100%;object-fit:cover"></div>` :
+            `<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">${isUploading ? '<div style="width:40px;height:40px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite"></div>' : `<label style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:5px 8px;font-size:11px;font-weight:700;color:var(--accent);text-align:center;white-space:nowrap"><input type="file" accept="image/*" capture data-photo-stat="${s.id}" style="display:none">📷 Camera</label><label style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:5px 8px;font-size:11px;font-weight:700;color:var(--muted);text-align:center;white-space:nowrap"><input type="file" accept="image/*" data-photo-stat="${s.id}" style="display:none">🖼 Library</label>`}</div>`
+          ) +
+          `<div style="flex:1"><div style="font-weight:600;font-size:14px">${fmtDate(s.date)}</div><div style="font-size:12px;color:var(--muted);margin-top:2px">${s.weight?s.weight+" lbs":""} ${s.bf?`· ${s.bf}% BF`:""} ${s.weight&&s.bf?`· ${getLean(s.weight,s.bf)} lbs lean`:""}${s.waist?` · W:${s.waist}"`:""}${s.chest?` · Ch:${s.chest}"`:""}${s.notes?`<br><span style="font-style:italic">${s.notes}</span>`:""}</div></div>` +
+          `<div style="display:flex;gap:4px">${hasPhoto?`<button style="background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:4px" data-del-photo="${s.id}">🗑️</button>`:""}<button style="background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;padding:4px 8px;font-family:var(--font-b)" data-edit-stat="${s.id}">Edit</button><button style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:4px" data-del-stat="${s.id}">×</button></div>` +
+          '</div></div>';
+      }).join("")}
+  </div>
+  ${ST.viewingPhoto?`<div style="position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:300;display:flex;align-items:center;justify-content:center" data-action="close-photo"><img src="${sbPhotoUrl(ST.viewingPhoto)}" style="max-width:100%;max-height:100%;object-fit:contain"><button data-action="close-photo" style="position:absolute;top:16px;right:16px;background:none;border:none;color:white;font-size:28px;cursor:pointer">✕</button></div>`:""}
+  <div style="height:20px"></div>`;
 }
 function renderBodyModal() {
   var e = ST.editingStat;
@@ -1544,6 +1578,44 @@ function attachAll() {
 
   // TIMER
   $("[data-action='stop-timer']")?.addEventListener("click",stopTimer);
+
+  // PHOTO UPLOAD
+  $$("[data-photo-stat]").forEach(el => el.addEventListener("change", async function() {
+    const file = el.files[0];
+    if(!file) return;
+    const statId = el.dataset.photoStat;
+    ST.photoUploading = statId;
+    render();
+    const path = await sbUploadPhoto(statId, file);
+    if(path) {
+      const stat = ST.bodyStats.find(s => s.id === statId);
+      if(stat) {
+        stat.photo_path = path;
+        saveBodyStat(stat);
+      }
+    }
+    ST.photoUploading = null;
+    render();
+  }));
+
+  // VIEW PHOTO fullscreen
+  $$("[data-view-photo]").forEach(el => el.addEventListener("click", () => {
+    ST.viewingPhoto = el.dataset.viewPhoto;
+    render();
+  }));
+  $("[data-action='close-photo']")?.addEventListener("click", () => { ST.viewingPhoto = null; render(); });
+
+  // DELETE PHOTO
+  $$("[data-del-photo]").forEach(el => el.addEventListener("click", async () => {
+    const statId = el.dataset.delPhoto;
+    const stat = ST.bodyStats.find(s => s.id === statId);
+    if(stat && stat.photo_path) {
+      await sbDeletePhoto(stat.photo_path);
+      stat.photo_path = null;
+      saveBodyStat(stat);
+      render();
+    }
+  }));
 
   // BODY MODAL
   $("[data-action='open-body']")?.addEventListener("click",()=>{ST.showBodyModal=true;ST.editingStat=null;render();});
@@ -1818,7 +1890,7 @@ function boot() {
 
     if(wl !== null) {
       ST.workoutLogs   = wl.map(function(r)  { return {id:r.id, dayId:r.day_id, date:r.date, duration:r.duration, exercises:r.exercises||[]}; });
-      ST.bodyStats     = bs.map(function(r)  { return {id:r.id, date:r.date, weight:r.weight, bf:r.bf, waist:r.waist, chest:r.chest, hips:r.hips, r_arm:r.r_arm, l_arm:r.l_arm, r_thigh:r.r_thigh, l_thigh:r.l_thigh, sleep:r.sleep, notes:r.notes}; });
+      ST.bodyStats     = bs.map(function(r)  { return {id:r.id, date:r.date, weight:r.weight, bf:r.bf, waist:r.waist, chest:r.chest, hips:r.hips, r_arm:r.r_arm, l_arm:r.l_arm, r_thigh:r.r_thigh, l_thigh:r.l_thigh, sleep:r.sleep, notes:r.notes, photo_path:r.photo_path||null}; });
       ST.nutritionLogs = nl.map(function(r)  { return {id:r.id, date:r.date, type:r.type, name:r.name, grams:r.grams, cal:r.cal, p:r.p, c:r.c, f:r.f, liters:r.liters}; });
       ST.aiReports     = air.map(function(r) { return {id:r.id, date:r.date, report:r.report, snapshot:r.snapshot}; });
       // Update local cache
