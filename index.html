@@ -452,7 +452,12 @@ function save() {
   S.set("air", ST.aiReports);
   ["wl","bs","nl","air"].forEach(k => { try { if(localStorage.getItem(k)) localStorage.removeItem(k); } catch {} });
 }
-function clientTs() { return new Date().toISOString(); } // client local time as ISO
+function clientTs() {
+  // Return timestamp in local timezone (not UTC) so Supabase stores the correct local time
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
 
 function saveWorkoutLog(log) {
   save();
