@@ -367,12 +367,17 @@ const FOODS = [
   {n:"Tofu (firm)",       cal:76,  p:8,   c:2,   f:4.3, cat:"Protein",    cuisine:["Chinese","Thai"]},
   {n:"Edamame",           cal:122, p:11,  c:10,  f:5,   cat:"Protein",    cuisine:["Chinese"]},
   {n:"Whey protein",      cal:400, p:80,  c:10,  f:7,   cat:"Supplement", cuisine:["All"]},
-  {n:"White rice (dry)",  cal:365, p:7,   c:80,  f:0.7, cat:"Carbs",      cuisine:["Peruvian","Chinese","Thai","Mexican"]},
-  {n:"Brown rice (dry)",  cal:370, p:8,   c:77,  f:3,   cat:"Carbs",      cuisine:["American"]},
-  {n:"Oats (dry)",        cal:389, p:17,  c:66,  f:7,   cat:"Carbs",      cuisine:["American"]},
-  {n:"Pasta (dry)",       cal:371, p:13,  c:74,  f:1.5, cat:"Carbs",      cuisine:["Italian"]},
+  {n:"White rice (cooked)", cal:130, p:2.7, c:28,  f:0.3, cat:"Carbs",      cuisine:["Peruvian","Chinese","Thai","Mexican"]},
+  {n:"White rice (dry/raw)",cal:365, p:7,   c:80,  f:0.7, cat:"Carbs",      cuisine:["Peruvian","Chinese","Thai","Mexican"]},
+  {n:"Brown rice (cooked)", cal:123, p:2.7, c:26,  f:1,   cat:"Carbs",      cuisine:["American"]},
+  {n:"Brown rice (dry/raw)",cal:370, p:8,   c:77,  f:3,   cat:"Carbs",      cuisine:["American"]},
+  {n:"Oats (cooked)",       cal:71,  p:2.5, c:12,  f:1.5, cat:"Carbs",      cuisine:["American"]},
+  {n:"Oats (dry/raw)",      cal:389, p:17,  c:66,  f:7,   cat:"Carbs",      cuisine:["American"]},
+  {n:"Pasta (cooked)",      cal:131, p:5,   c:25,  f:1,   cat:"Carbs",      cuisine:["Italian"]},
+  {n:"Pasta (dry/raw)",     cal:371, p:13,  c:74,  f:1.5, cat:"Carbs",      cuisine:["Italian"]},
   {n:"Whole wheat pasta", cal:357, p:14,  c:71,  f:2.5, cat:"Carbs",      cuisine:["Italian"]},
-  {n:"Quinoa (dry)",      cal:368, p:14,  c:64,  f:6,   cat:"Carbs",      cuisine:["Peruvian"]},
+  {n:"Quinoa (cooked)",     cal:120, p:4.4, c:22,  f:1.9, cat:"Carbs",      cuisine:["Peruvian"]},
+  {n:"Quinoa (dry/raw)",    cal:368, p:14,  c:64,  f:6,   cat:"Carbs",      cuisine:["Peruvian"]},
   {n:"White potato",      cal:77,  p:2,   c:17,  f:0.1, cat:"Carbs",      cuisine:["Peruvian","American"]},
   {n:"Sweet potato",      cal:86,  p:1.6, c:20,  f:0.1, cat:"Carbs",      cuisine:["Peruvian","American","Mexican"]},
   {n:"Yuca / cassava",    cal:160, p:1.4, c:38,  f:0.3, cat:"Carbs",      cuisine:["Peruvian"]},
@@ -383,7 +388,8 @@ const FOODS = [
   {n:"Black beans (cooked)",cal:132,p:9,  c:24,  f:0.5, cat:"Carbs",      cuisine:["Mexican","American"]},
   {n:"Pinto beans (cooked)",cal:143,p:9,  c:26,  f:0.6, cat:"Carbs",      cuisine:["Mexican"]},
   {n:"Lentils (cooked)",  cal:116, p:9,   c:20,  f:0.4, cat:"Carbs",      cuisine:["Peruvian","Italian"]},
-  {n:"Rice noodles (dry)",cal:364, p:6,   c:80,  f:0.6, cat:"Carbs",      cuisine:["Chinese","Thai"]},
+  {n:"Rice noodles (cooked)",cal:109, p:2.5, c:24,  f:0.2, cat:"Carbs",      cuisine:["Chinese","Thai"]},
+  {n:"Rice noodles (dry/raw)",cal:364, p:6,   c:80,  f:0.6, cat:"Carbs",      cuisine:["Chinese","Thai"]},
   {n:"Banana",            cal:89,  p:1.1, c:23,  f:0.3, cat:"Carbs",      cuisine:["All"]},
   {n:"Apple",             cal:52,  p:0.3, c:14,  f:0.2, cat:"Carbs",      cuisine:["American"]},
   {n:"Blueberries",       cal:57,  p:0.7, c:14,  f:0.3, cat:"Carbs",      cuisine:["American"]},
@@ -446,25 +452,27 @@ function save() {
   S.set("air", ST.aiReports);
   ["wl","bs","nl","air"].forEach(k => { try { if(localStorage.getItem(k)) localStorage.removeItem(k); } catch {} });
 }
+function clientTs() { return new Date().toISOString(); } // client local time as ISO
+
 function saveWorkoutLog(log) {
   save();
-  sbUpsert("workout_logs", { id:log.id, day_id:log.dayId, date:log.date, duration:log.duration, exercises:log.exercises });
+  sbUpsert("workout_logs", { id:log.id, day_id:log.dayId, date:log.date, duration:log.duration, exercises:log.exercises, created_at:clientTs() });
 }
 function saveBodyStat(stat) {
   save();
-  sbUpsert("body_stats", { id:stat.id, date:stat.date, weight:stat.weight, bf:stat.bf, waist:stat.waist, chest:stat.chest, r_arm:stat.r_arm, l_arm:stat.l_arm, r_thigh:stat.r_thigh, l_thigh:stat.l_thigh, hips:stat.hips, sleep:stat.sleep, notes:stat.notes });
+  sbUpsert("body_stats", { id:stat.id, date:stat.date, weight:stat.weight, bf:stat.bf, waist:stat.waist, chest:stat.chest, r_arm:stat.r_arm, l_arm:stat.l_arm, r_thigh:stat.r_thigh, l_thigh:stat.l_thigh, hips:stat.hips, sleep:stat.sleep, notes:stat.notes, created_at:clientTs() });
 }
 function saveNutritionLog(entry) {
   save();
-  sbUpsert("nutrition_logs", { id:entry.id, date:entry.date, type:entry.type, name:entry.name||null, grams:entry.grams||null, cal:entry.cal||null, p:entry.p||null, c:entry.c||null, f:entry.f||null, liters:entry.liters||null });
+  sbUpsert("nutrition_logs", { id:entry.id, date:entry.date, type:entry.type, name:entry.name||null, grams:entry.grams||null, cal:entry.cal||null, p:entry.p||null, c:entry.c||null, f:entry.f||null, liters:entry.liters||null, created_at:clientTs() });
 }
 function saveWaterLog(entry) {
   save();
-  sbUpsert("nutrition_logs", { id:entry.id, date:entry.date, type:"water", liters:entry.liters });
+  sbUpsert("nutrition_logs", { id:entry.id, date:entry.date, type:"water", liters:entry.liters, created_at:clientTs() });
 }
 function saveAIReport(report) {
   save();
-  sbUpsert("ai_reports", { id:report.id, date:report.date, report:report.report, snapshot:report.snapshot });
+  sbUpsert("ai_reports", { id:report.id, date:report.date, report:report.report, snapshot:report.snapshot, created_at:clientTs() });
 }
 function deleteFromCloud(table, id) { sbDelete(table, id); }
 function syncToCloud(t, r)          { sbUpsert(t, r); }
@@ -483,7 +491,8 @@ function weekNum()    { var d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDa
 function nutByDate(date) { return ST.nutritionLogs.filter(function(l){return l.date===date&&l.type==="food";}); }
 function nutSum(entries)  { return entries.reduce(function(a,e){return {cal:a.cal+(e.cal||0),p:a.p+(e.p||0),c:a.c+(e.c||0),f:a.f+(e.f||0)};},{cal:0,p:0,c:0,f:0}); }
 function todayWater()     { var l=ST.nutritionLogs.find(function(l){return l.date===today()&&l.type==="water";}); return l?l.liters:0; }
-function calcMacros(food,grams) { var g=parseFloat(grams)||0,r=g/100; return {cal:Math.round(food.cal*r),p:Math.round(food.p*r*10)/10,c:Math.round(food.c*r*10)/10,f:Math.round(food.f*r*10)/10}; }
+function calcMacros(food,grams) { var g=parseFloat(grams)||0,r=g/100; return {cal:Math.round(food.cal*r),p:Math.round(food.p*r),c:Math.round(food.c*r),f:Math.round(food.f*r)}; }
+function ri(v) { return Math.round(parseFloat(v)||0); } // round to integer for display
 function searchFoods(q)   { if(!q||q.length<1) return []; var ql=q.toLowerCase(); return FOODS.filter(function(f){return f.n.toLowerCase().indexOf(ql)>=0;}).slice(0,8); }
 
 async function lookupFoodWithClaude(query) {
@@ -777,7 +786,7 @@ function renderPage() {
 
 // ── DASHBOARD ──────────────────────────────────────
 function macroRows(sum) {
-  return [{label:"Calories",val:sum.cal,target:TARGETS.cal,color:"#f97316",unit:"kcal"},{label:"Protein",val:sum.p,target:TARGETS.p,color:"#22c55e",unit:"g"},{label:"Carbs",val:sum.c,target:TARGETS.c,color:"#4f8ef7",unit:"g"},{label:"Fat",val:sum.f,target:TARGETS.f,color:"#eab308",unit:"g"}]
+  return [{label:"Calories",val:sum.cal,target:TARGETS.cal,color:"#f97316",unit:"kcal"},{label:"Protein",val:ri(sum.p),target:TARGETS.p,color:"#22c55e",unit:"g"},{label:"Carbs",val:ri(sum.c),target:TARGETS.c,color:"#4f8ef7",unit:"g"},{label:"Fat",val:ri(sum.f),target:TARGETS.f,color:"#eab308",unit:"g"}]
     .map(m=>`<div class="pb-row"><div class="pb-label"><span class="pb-name">${m.label}</span><span class="pb-val">${m.val}${m.unit} / ${m.target}${m.unit}</span></div><div class="pb-wrap"><div class="pb-fill" style="width:${Math.min(100,(m.val/m.target)*100).toFixed(1)}%;background:${m.color}"></div></div></div>`).join("");
 }
 function renderDashboard() {
@@ -785,12 +794,16 @@ function renderDashboard() {
   const wl=weekLogs(), sum=nutSum(nutByDate(today()));
   const wDelta=latest.weight&&prev.weight?(latest.weight-prev.weight).toFixed(1):null;
   return `
-  <div class="ph"><div class="pt">DIEGO'S TRACKER</div><div class="ps">Week ${weekNum()} · ${wl.length}/6 sessions · <span style="color:${ST.online?'var(--green)':'var(--orange)'}">${ST.online?'● Cloud sync on':'● Offline'}</span></div></div>
+  <div class="ph"><div class="pt">DIEGO'S TRACKER</div><div class="ps">${(()=>{
+    const firstLog = ST.workoutLogs.length > 0 ? ST.workoutLogs[ST.workoutLogs.length-1].date : null;
+    const weekLabel = firstLog ? "Training week " + Math.ceil((daysAgo(firstLog)+1)/7) : new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"});
+    return weekLabel;
+  })()} · ${wl.length}/6 sessions · <span style="color:${ST.online?'var(--green)':'var(--orange)'}">${ST.online?'● Synced':'● Offline — reopen to sync'}</span></div></div>
   <div class="wbanner"><div class="wname">LET'S GO,<br>DIEGO.</div><div class="wsub">${latest.weight?`${latest.weight} lbs · ${latest.bf}% BF · ${getLean(latest.weight,latest.bf)||"—"} lbs lean mass`:"Tap Body tab to log your first entry"}</div></div>
   <div class="sgrid">
     <div class="sc"><div class="sl">Weight</div><div class="sv" style="color:#4f8ef7">${latest.weight||"—"}</div><div class="su">lbs</div>${wDelta!==null?`<div class="sd ${parseFloat(wDelta)<=0?"dg":"db"}">${parseFloat(wDelta)>0?"+":""}${wDelta} lbs</div>`:""}</div>
     <div class="sc"><div class="sl">Body Fat</div><div class="sv" style="color:#ef4444">${latest.bf||"—"}</div><div class="su">%</div></div>
-    <div class="sc"><div class="sl">Protein Today</div><div class="sv" style="color:#22c55e">${sum.p||"—"}</div><div class="su">/ ${TARGETS.p}g</div></div>
+    <div class="sc"><div class="sl">Protein Today</div><div class="sv" style="color:#22c55e">${ri(sum.p)||"—"}</div><div class="su">/ ${TARGETS.p}g</div></div>
     <div class="sc"><div class="sl">Calories Today</div><div class="sv" style="color:#f97316">${sum.cal||"—"}</div><div class="su">/ ${TARGETS.cal}</div></div>
   </div>
   <div class="card">
@@ -802,6 +815,37 @@ function renderDashboard() {
     <div class="ct">Quick Start</div>
     ${DAY_ORDER.map(d=>{const plan=PLAN[d],last=ST.workoutLogs.find(l=>l.dayId===d),isToday=getToday()===d;return`<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer" data-start-day="${d}"><div style="width:36px;height:36px;border-radius:10px;background:${plan.color}22;border:1px solid ${plan.color}44;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${plan.emoji}</div><div style="flex:1"><div style="font-weight:600;font-size:13px;${isToday?`color:${plan.color}`:""}">${plan.label} — ${plan.title}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${plan.duration} · ${last?`Last: ${fmtDate(last.date)}`:"Never done"}</div></div><div style="color:var(--muted);font-size:20px">›</div></div>`;}).join("")}
   </div>
+  ${(()=>{
+    const h = new Date().getHours();
+    const m = new Date().getMinutes();
+    const mins = h * 60 + m;
+    // Show reminder from 7pm (19:00) onwards
+    if(mins < 19*60) return "";
+    const isAfter8  = mins >= 20*60;
+    const isAfter10 = mins >= 22*60;
+    const color  = isAfter10 ? "var(--red)" : isAfter8 ? "var(--orange)" : "var(--yellow)";
+    const border = isAfter10 ? "rgba(239,68,68,.3)" : isAfter8 ? "rgba(249,115,22,.3)" : "rgba(234,179,8,.3)";
+    const bg     = isAfter10 ? "rgba(239,68,68,.08)" : isAfter8 ? "rgba(249,115,22,.08)" : "rgba(234,179,8,.08)";
+    const icon   = isAfter10 ? "😴" : isAfter8 ? "🚫" : "⏰";
+    const title  = isAfter10 ? "Bed time!" : isAfter8 ? "Kitchen is closed" : "Last call — 8pm in " + (20*60 - mins) + " min";
+    const msg    = isAfter10
+      ? "You should be asleep. 5am comes fast. Gym performance drops significantly with less than 7 hours."
+      : isAfter8
+      ? "No more eating tonight. Sleep in 2 hours — food now hurts sleep quality and recovery."
+      : "Finish any remaining meals before 8pm. Eat slow-digesting protein (Greek yogurt, cottage cheese) if still hungry.";
+    return `<div style="margin:0 16px 12px;background:${bg};border:1px solid ${border};border-radius:var(--r);padding:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="font-size:24px">${icon}</div>
+        <div style="font-weight:700;font-size:14px;color:${color}">${title}</div>
+      </div>
+      <div style="font-size:12px;color:var(--muted2);line-height:1.6">${msg}</div>
+      <div style="margin-top:10px;display:flex;gap:16px;font-size:11px;color:var(--muted)">
+        <span>🍽️ Stop eating: <strong style="color:${color}">8:00 PM</strong></span>
+        <span>😴 Bed by: <strong style="color:${color}">10:00 PM</strong></span>
+        <span>⏰ Wake up: <strong style="color:var(--accent)">4:30 AM</strong></span>
+      </div>
+    </div>`;
+  })()}
   <div class="card">
     <div class="ct">💾 Backup & Restore</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">Export your data as a JSON file. Any future version of this app will import it and keep all your progress.</div>
@@ -884,14 +928,109 @@ function renderNutrition() {
   ${ST.nutTab==="today"?renderNutToday(sum,todayE,water,filled):renderNutWeek()}`;
 }
 function renderNutToday(sum, entries, water, filled) {
+  // Macro bars — each bar represents the daily goal, filled portion = consumed
+  const bars = [
+    {label:"Protein", val:ri(sum.p),  target:TARGETS.p,  color:"#22c55e", unit:"g"},
+    {label:"Carbs",   val:ri(sum.c),  target:TARGETS.c,  color:"#4f8ef7", unit:"g"},
+    {label:"Fat",     val:ri(sum.f),  target:TARGETS.f,  color:"#eab308", unit:"g"},
+  ];
   return `
   <div style="padding:0 16px 12px;display:flex;gap:10px">
     <button class="btn bp" style="flex:2" data-action="open-food">+ Log Food</button>
     <button class="btn bg" style="flex:1" data-water="0.25">💧 +¼L</button>
   </div>
   <div class="card"><div class="ct">Today's Macros</div>${macroRows(sum)}</div>
-  <div class="card"><div class="ct">Macro Breakdown</div><div style="position:relative;height:180px;margin-top:8px"><canvas id="chart-donut"></canvas></div><div style="display:flex;justify-content:center;gap:16px;margin-top:10px;font-size:12px"><span style="color:#22c55e">● P ${sum.p}g</span><span style="color:#4f8ef7">● C ${sum.c}g</span><span style="color:#eab308">● F ${sum.f}g</span></div></div>
   <div class="card">
+    <div class="ct">Calorie Budget</div>
+    ${(()=>{
+      const remaining  = TARGETS.cal - sum.cal;
+      const pLeft      = Math.max(0, Math.round(TARGETS.p - ri(sum.p)));
+      const isCalOver  = remaining < 0;
+      const isProtDone = pLeft === 0;
+      const calColor   = isCalOver ? "var(--red)" : remaining < 200 ? "var(--yellow)" : "var(--green)";
+      const protColor  = isProtDone ? "var(--green)" : pLeft > 50 ? "var(--red)" : "var(--orange)";
+
+      // Protein sources — grams needed to hit pLeft, and whether they fit in remaining calories
+      const protSources = [
+        {name:"Whey shake",      pPer100:80,  calPer100:400, unit:"g",    emoji:"🥤", note:"~1 scoop = 30g"},
+        {name:"Chicken breast",  pPer100:31,  calPer100:165, unit:"g",    emoji:"🍗", note:"cooked"},
+        {name:"Greek yogurt",    pPer100:10,  calPer100:73,  unit:"g",    emoji:"🫙", note:"2% fat"},
+        {name:"Cottage cheese",  pPer100:11,  calPer100:90,  unit:"g",    emoji:"🧀", note:"2% fat"},
+        {name:"Egg whites",      pPer100:11,  calPer100:52,  unit:"g",    emoji:"🥚", note:"~3 whites = 100g"},
+        {name:"Tuna (canned)",   pPer100:26,  calPer100:116, unit:"g",    emoji:"🐟", note:"drained"},
+      ];
+
+      const suggestions = protSources.map(s => {
+        const gramsNeeded = pLeft > 0 ? Math.round(pLeft / (s.pPer100/100)) : 0;
+        const calCost = Math.round(gramsNeeded * s.calPer100 / 100);
+        const fits = calCost <= remaining + 100; // 100 kcal wiggle room
+        return {...s, gramsNeeded, calCost, fits};
+      }).filter(s => s.gramsNeeded > 0 && s.gramsNeeded < 800);
+
+      return `
+        <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:14px">
+          <div>
+            <div style="font-family:var(--font-d);font-size:40px;letter-spacing:1px;line-height:1;color:${calColor}">${Math.abs(remaining)}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:3px">${isCalOver?"kcal over budget":"kcal remaining"}</div>
+          </div>
+          <div style="text-align:right">
+            <div style="font-family:var(--font-d);font-size:28px;letter-spacing:.5px;color:${protColor}">${pLeft}g</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:1px">${isProtDone?"protein goal hit! 💪":"protein still needed"}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">${ri(sum.p)} / ${TARGETS.p}g logged</div>
+          </div>
+        </div>
+
+        ${isCalOver && isProtDone ? `
+          <div style="background:rgba(34,197,94,.08);border-left:3px solid var(--green);border-radius:0 var(--rs) var(--rs) 0;padding:10px 12px;font-size:12px;color:var(--muted2)">
+            Protein goal hit ✅ — slightly over on calories but macros are solid. One day won't derail progress.
+          </div>
+
+        ` : isCalOver && !isProtDone ? `
+          <div style="background:rgba(239,68,68,.08);border-left:3px solid var(--red);border-radius:0 var(--rs) var(--rs) 0;padding:10px 12px;font-size:12px;color:var(--muted2);margin-bottom:12px">
+            Over on calories but still <strong style="color:var(--red)">${pLeft}g short on protein</strong>. Prioritize low-cal, high-protein options below.
+          </div>
+          <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">High-protein options to close the gap</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            ${suggestions.slice(0,4).map(s=>`
+            <div style="display:flex;align-items:center;gap:10px;background:var(--bg3);border-radius:var(--rs);padding:10px 12px;border:1px solid ${s.fits?"rgba(34,197,94,.2)":"var(--border)"}">
+              <div style="font-size:20px">${s.emoji}</div>
+              <div style="flex:1">
+                <div style="font-weight:700;font-size:13px">${s.name} <span style="font-size:11px;color:var(--muted);font-weight:400">${s.note}</span></div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">${s.calCost} kcal · +${pLeft}g protein</div>
+              </div>
+              <div style="text-align:right;flex-shrink:0">
+                <div style="font-family:var(--font-d);font-size:22px;color:${s.fits?"var(--green)":"var(--orange)"}">${s.gramsNeeded}g</div>
+              </div>
+            </div>`).join("")}
+          </div>
+
+        ` : !isProtDone && remaining > 50 ? `
+          <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Hit your protein with these options</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            ${suggestions.slice(0,4).map(s=>`
+            <div style="display:flex;align-items:center;gap:10px;background:var(--bg3);border-radius:var(--rs);padding:10px 12px;border:1px solid ${s.fits?"rgba(34,197,94,.2)":"rgba(249,115,22,.2)"}">
+              <div style="font-size:20px">${s.emoji}</div>
+              <div style="flex:1">
+                <div style="font-weight:700;font-size:13px">${s.name} <span style="font-size:11px;color:var(--muted);font-weight:400">${s.note}</span></div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">${s.calCost} kcal · closes ${pLeft}g gap · ${s.fits?`<span style="color:var(--green)">fits budget ✓</span>`:`<span style="color:var(--orange)">${s.calCost-remaining} kcal over</span>`}</div>
+              </div>
+              <div style="text-align:right;flex-shrink:0">
+                <div style="font-family:var(--font-d);font-size:22px;color:${s.fits?"var(--green)":"var(--orange)"}">${s.gramsNeeded}g</div>
+              </div>
+            </div>`).join("")}
+          </div>
+
+        ` : isProtDone && !isCalOver ? `
+          <div style="background:rgba(34,197,94,.08);border-left:3px solid var(--green);border-radius:0 var(--rs) var(--rs) 0;padding:10px 12px;font-size:12px;color:var(--muted2)">
+            Protein goal hit and ${remaining} kcal still available. Fill with carbs around your workout or fats if it's late. 🎯
+          </div>
+        ` : `
+          <div style="font-size:12px;color:var(--muted);text-align:center;padding:8px 0">Almost there — on track! 🎯</div>
+        `}
+      `;
+    })()}
+  </div>
+  <div class="card" id="water-card">
     <div class="ct">Water — ${water.toFixed(1)}L / ${TARGETS.water}L</div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
       <button class="btn bg" style="padding:8px 12px;font-size:13px" data-water="-0.25">-¼L</button>
@@ -902,7 +1041,7 @@ function renderNutToday(sum, entries, water, filled) {
     <div class="water-track">${Array.from({length:8},(_,i)=>`<div class="water-drop${i<filled?" filled":""}">💧</div>`).join("")}</div>
   </div>
   <div class="card"><div class="ct">Food Log — ${entries.length} items</div>
-    ${entries.length===0?`<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">No food logged yet today.</div>`:entries.map(e=>`<div class="food-item"><div class="food-dot" style="background:${e.p>30?"#22c55e":e.cal>400?"#f97316":"#4f8ef7"}"></div><div class="food-info"><div class="food-name">${e.name}</div><div class="food-macros">${e.grams}g · ${e.cal} kcal · P:${e.p}g C:${e.c}g F:${e.f}g</div></div><button style="background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;padding:4px 8px;font-family:var(--font-b)" data-edit-food="${e.id}">Edit</button><button class="food-del" data-del-food="${e.id}">×</button></div>`).join("")}
+    ${entries.length===0?`<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">No food logged yet today.</div>`:entries.map(e=>`<div class="food-item"><div class="food-dot" style="background:${e.p>30?"#22c55e":e.cal>400?"#f97316":"#4f8ef7"}"></div><div class="food-info"><div class="food-name">${e.name}</div><div class="food-macros">${e.grams}g · ${e.cal} kcal · P:${ri(e.p)}g C:${ri(e.c)}g F:${ri(e.f)}g</div></div><button style="background:none;border:none;color:var(--accent);font-size:13px;font-weight:600;cursor:pointer;padding:4px 8px;font-family:var(--font-b)" data-edit-food="${e.id}">Edit</button><button class="food-del" data-del-food="${e.id}">×</button></div>`).join("")}
   </div>`;
 }
 function renderNutWeek() {
@@ -958,7 +1097,7 @@ function buildFoodModalInner() {
       <div class="fsr-macros">
         ${f.cat==="Claude Lookup" && f.food_type!=="A"
           ? `${f.serving_label}: ${Math.round(f.cal*(f.serving_grams||100)/100)} kcal · P:${Math.round(f.p*(f.serving_grams||100)/100*10)/10}g C:${Math.round(f.c*(f.serving_grams||100)/100*10)/10}g F:${Math.round(f.f*(f.serving_grams||100)/100*10)/10}g`
-          : `${f.cal} kcal · P:${f.p}g C:${f.c}g F:${f.f}g per 100g`
+          : `${f.cal} kcal · P:${ri(f.p)}g C:${ri(f.c)}g F:${ri(f.f)}g per 100g`
         }
       </div>
     </div>`).join("")}</div>`;
@@ -981,7 +1120,7 @@ function buildFoodModalInner() {
       <div style="font-size:12px;color:var(--muted)">
         ${ST.foodEntry.food.cat==="Claude Lookup" && ST.foodEntry.food.food_type !== "A"
           ? `Typical serving: ${ST.foodEntry.food.serving_label} (~${ST.foodEntry.food.serving_grams}g) · ${Math.round(ST.foodEntry.food.cal*(ST.foodEntry.food.serving_grams)/100)} kcal`
-          : `${ST.foodEntry.food.cal} kcal · P:${ST.foodEntry.food.p}g · C:${ST.foodEntry.food.c}g · F:${ST.foodEntry.food.f}g per 100g`
+          : `${ST.foodEntry.food.cal} kcal · P:${ri(ST.foodEntry.food.p)}g · C:${ri(ST.foodEntry.food.c)}g · F:${ri(ST.foodEntry.food.f)}g per 100g`
         }
       </div>
     </div>
@@ -1009,17 +1148,17 @@ function buildCSTableHTML() {
       return `<div class="cs-row${exp?" expanded":""}" data-cs-exp="${f.n}">
         <div><div class="cs-fname">${f.n}</div><div class="cs-cat">${f.cat}</div></div>
         <div class="cs-num" style="color:#f97316">${f.cal}</div>
-        <div class="cs-num" style="color:#22c55e">${f.p}g</div>
-        <div class="cs-num" style="color:#4f8ef7">${f.c}g</div>
-        <div class="cs-num" style="color:#eab308">${f.f}g</div>
+        <div class="cs-num" style="color:#22c55e">${ri(f.p)}g</div>
+        <div class="cs-num" style="color:#4f8ef7">${ri(f.c)}g</div>
+        <div class="cs-num" style="color:#eab308">${ri(f.f)}g</div>
       </div>
       ${exp?`<div class="cs-detail">
         <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin-bottom:6px">Serving Sizes</div>
         <div class="cs-serving">
-          <div class="cs-sv-item"><div class="cs-sv-label">50g</div><div class="cs-sv-macros">${s50.cal} kcal · P:${s50.p}g C:${s50.c}g F:${s50.f}g</div></div>
-          <div class="cs-sv-item"><div class="cs-sv-label">100g</div><div class="cs-sv-macros">${s100.cal} kcal · P:${s100.p}g C:${s100.c}g F:${s100.f}g</div></div>
-          <div class="cs-sv-item"><div class="cs-sv-label">150g</div><div class="cs-sv-macros">${s150.cal} kcal · P:${s150.p}g C:${s150.c}g F:${s150.f}g</div></div>
-          <div class="cs-sv-item"><div class="cs-sv-label">200g</div><div class="cs-sv-macros">${s200.cal} kcal · P:${s200.p}g C:${s200.c}g F:${s200.f}g</div></div>
+          <div class="cs-sv-item"><div class="cs-sv-label">50g</div><div class="cs-sv-macros">${s50.cal} kcal · P:${ri(s50.p)}g C:${ri(s50.c)}g F:${ri(s50.f)}g</div></div>
+          <div class="cs-sv-item"><div class="cs-sv-label">100g</div><div class="cs-sv-macros">${s100.cal} kcal · P:${ri(s100.p)}g C:${ri(s100.c)}g F:${ri(s100.f)}g</div></div>
+          <div class="cs-sv-item"><div class="cs-sv-label">150g</div><div class="cs-sv-macros">${s150.cal} kcal · P:${ri(s150.p)}g C:${ri(s150.c)}g F:${ri(s150.f)}g</div></div>
+          <div class="cs-sv-item"><div class="cs-sv-label">200g</div><div class="cs-sv-macros">${s200.cal} kcal · P:${ri(s200.p)}g C:${ri(s200.c)}g F:${ri(s200.f)}g</div></div>
         </div>
         <div style="margin-top:10px;font-size:11px;color:var(--muted)">Cuisines: ${(f.cuisine||["All"]).join(", ")}</div>
         <button class="btn bp" style="margin-top:10px;font-size:12px;padding:8px 16px" data-prefill='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat}).replace(/'/g,"&#39;")}'>+ Log This Food →</button>
@@ -1193,8 +1332,25 @@ function addWater(amt) {
     log={id:Date.now().toString(),date:t,type:"water",liters:amt};
     ST.nutritionLogs.unshift(log);
     saveWaterLog(log);
-  } else { save(); }
-  render();
+  } else { save(); return; }
+
+  // Update only the water card — no full render, no scroll reset
+  const water=log.liters, filled=Math.round((water/TARGETS.water)*8);
+  const card=document.getElementById("water-card");
+  if(card) {
+    card.innerHTML=`
+      <div class="ct">Water — ${water.toFixed(1)}L / ${TARGETS.water}L</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <button class="btn bg" style="padding:8px 12px;font-size:13px" data-water="-0.25">-¼L</button>
+        <button class="btn bp" style="flex:1;padding:8px;font-size:13px" data-water="0.25">+¼L</button>
+        <button class="btn bp" style="flex:1;padding:8px;font-size:13px" data-water="0.5">+½L</button>
+      </div>
+      <div class="pb-wrap" style="margin-bottom:10px"><div class="pb-fill" style="width:${Math.min(100,(water/TARGETS.water)*100).toFixed(1)}%;background:#06b6d4"></div></div>
+      <div class="water-track">${Array.from({length:8},(_,i)=>`<div class="water-drop${i<filled?" filled":""}">💧</div>`).join("")}</div>`;
+    card.querySelectorAll("[data-water]").forEach(el=>el.addEventListener("click",()=>addWater(parseFloat(el.dataset.water))));
+  } else {
+    render();
+  }
 }
 
 // ══════════════════════════════════════════════════
