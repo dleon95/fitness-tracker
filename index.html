@@ -424,7 +424,47 @@ const FOODS = [
   {n:"Oyster sauce (tbsp)",cal:29, p:0.4, c:6.6, f:0.1, cat:"Condiment",  cuisine:["Chinese","Thai"]},
 ];
 
-const TARGETS = {cal:2400, p:175, c:245, f:65, water:3.5};
+// Quick serving sizes for whole foods — shown as tap buttons in food modal
+const QUICK_SERVINGS = {
+  "Apple":              [{label:"Small",  g:150},{label:"Medium", g:182},{label:"Large",  g:223}],
+  "Banana":             [{label:"Small",  g:100},{label:"Medium", g:120},{label:"Large",  g:150}],
+  "Mango":              [{label:"½ mango",g:100},{label:"1 mango", g:200}],
+  "Blueberries":        [{label:"¼ cup",  g:37}, {label:"½ cup",  g:74}, {label:"1 cup",  g:148}],
+  "Avocado":            [{label:"¼ avocado",g:37},{label:"½ avocado",g:75},{label:"Whole",g:150}],
+  "Whole egg":          [{label:"1 egg",  g:50}, {label:"2 eggs",  g:100},{label:"3 eggs", g:150}],
+  "Egg white":          [{label:"1 white",g:33}, {label:"2 whites",g:66}, {label:"3 whites",g:99}],
+  "White potato":       [{label:"Small",  g:130},{label:"Medium", g:213},{label:"Large",  g:369}],
+  "Sweet potato":       [{label:"Small",  g:130},{label:"Medium", g:200},{label:"Large",  g:300}],
+  "Broccoli":           [{label:"½ cup",  g:46}, {label:"1 cup",   g:91}, {label:"2 cups", g:182}],
+  "Spinach":            [{label:"1 cup raw",g:30},{label:"2 cups raw",g:60},{label:"1 cup cooked",g:180}],
+  "Tomato":             [{label:"Small",  g:90}, {label:"Medium",  g:123},{label:"Large",  g:180}],
+  "Bell pepper":        [{label:"Small",  g:75}, {label:"Medium",  g:120},{label:"Large",  g:164}],
+  "Cucumber":           [{label:"½ cup sliced",g:52},{label:"1 cup sliced",g:104},{label:"Whole",g:300}],
+  "Greek yogurt 2%":    [{label:"½ cup",  g:113},{label:"¾ cup",  g:170},{label:"1 cup",  g:227}],
+  "Cottage cheese 2%":  [{label:"½ cup",  g:113},{label:"¾ cup",  g:170},{label:"1 cup",  g:227}],
+  "Peanut butter":      [{label:"1 tbsp", g:16}, {label:"2 tbsp",  g:32}],
+  "Almonds":            [{label:"10 almonds",g:14},{label:"¼ cup",g:36},{label:"½ cup",   g:72}],
+  "Olive oil":          [{label:"1 tsp",  g:4.5},{label:"1 tbsp",  g:13.5},{label:"2 tbsp",g:27}],
+  "Chicken breast":     [{label:"3 oz",   g:85}, {label:"4 oz",    g:113},{label:"6 oz",   g:170},{label:"8 oz",g:227}],
+  "Salmon":             [{label:"3 oz",   g:85}, {label:"4 oz",    g:113},{label:"6 oz",   g:170}],
+  "Tilapia":            [{label:"3 oz",   g:85}, {label:"4 oz",    g:113},{label:"6 oz",   g:170}],
+  "Tuna (canned)":      [{label:"½ can",  g:80}, {label:"1 can",   g:160}],
+  "Shrimp":             [{label:"3 oz",   g:85}, {label:"4 oz",    g:113},{label:"6 oz",   g:170}],
+  "White rice (cooked)":[{label:"½ cup",  g:93}, {label:"1 cup",   g:186},{label:"1½ cups",g:279}],
+  "Oats (dry/raw)":     [{label:"¼ cup",  g:20}, {label:"⅓ cup",   g:27}, {label:"½ cup",  g:40}],
+  "Oats (cooked)":      [{label:"½ cup",  g:117},{label:"1 cup",   g:234}],
+  "Whey protein":       [{label:"½ scoop",g:15}, {label:"1 scoop", g:30}, {label:"1.5 scoops",g:45}],
+};
+
+function getQuickServings(foodName) {
+  // Exact match first
+  if(QUICK_SERVINGS[foodName]) return QUICK_SERVINGS[foodName];
+  // Partial match
+  var key = Object.keys(QUICK_SERVINGS).find(function(k){
+    return foodName.toLowerCase().includes(k.toLowerCase()) || k.toLowerCase().includes(foodName.toLowerCase());
+  });
+  return key ? QUICK_SERVINGS[key] : null;
+}
 
 // ══════════════════════════════════════════════════
 // STATE
@@ -435,6 +475,7 @@ const ST = {
   bodyStats:     S.get("bs", [{id:"init", date:new Date().toISOString().split("T")[0], weight:170, bf:19, waist:null, notes:"Starting point"}]),
   nutritionLogs: S.get("nl", []),
   aiReports:     S.get("air", []),
+  customFoods:   S.get("cf", []),  // foods saved from Claude lookups
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {},
   restTimer: null,
   showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log",
@@ -450,6 +491,7 @@ function save() {
   S.set("bs",  ST.bodyStats);
   S.set("nl",  ST.nutritionLogs);
   S.set("air", ST.aiReports);
+  S.set("cf",  ST.customFoods);
   ["wl","bs","nl","air"].forEach(k => { try { if(localStorage.getItem(k)) localStorage.removeItem(k); } catch {} });
 }
 function clientTs() {
@@ -498,7 +540,37 @@ function nutSum(entries)  { return entries.reduce(function(a,e){return {cal:a.ca
 function todayWater()     { var l=ST.nutritionLogs.find(function(l){return l.date===today()&&l.type==="water";}); return l?l.liters:0; }
 function calcMacros(food,grams) { var g=parseFloat(grams)||0,r=g/100; return {cal:Math.round(food.cal*r),p:Math.round(food.p*r),c:Math.round(food.c*r),f:Math.round(food.f*r)}; }
 function ri(v) { return Math.round(parseFloat(v)||0); } // round to integer for display
-function searchFoods(q)   { if(!q||q.length<1) return []; var ql=q.toLowerCase(); return FOODS.filter(function(f){return f.n.toLowerCase().indexOf(ql)>=0;}).slice(0,8); }
+function searchFoods(q) {
+  if(!q || q.length < 1) return [];
+  var ql = q.toLowerCase();
+  // Search custom foods first (user's saved Claude lookups)
+  var custom = ST.customFoods.filter(function(f){ return f.n.toLowerCase().indexOf(ql) >= 0; });
+  // Then built-in database
+  var builtin = FOODS.filter(function(f){ return f.n.toLowerCase().indexOf(ql) >= 0; });
+  // Combine, dedupe by name, limit to 8
+  var seen = {};
+  var results = [];
+  custom.concat(builtin).forEach(function(f){
+    if(!seen[f.n]) { seen[f.n] = true; results.push(f); }
+  });
+  return results.slice(0, 8);
+}
+
+function saveCustomFood(food_entry) {
+  // Don't save if already in built-in database
+  var inDB = FOODS.some(function(f){ return f.n.toLowerCase() === food_entry.n.toLowerCase(); });
+  if(inDB) return;
+  // Don't duplicate custom foods
+  var exists = ST.customFoods.some(function(f){ return f.n.toLowerCase() === food_entry.n.toLowerCase(); });
+  if(exists) {
+    // Update existing entry with latest data
+    var idx = ST.customFoods.findIndex(function(f){ return f.n.toLowerCase() === food_entry.n.toLowerCase(); });
+    if(idx >= 0) ST.customFoods[idx] = food_entry;
+  } else {
+    ST.customFoods.unshift(food_entry);
+  }
+  save();
+}
 
 async function lookupFoodWithClaude(query) {
   ST.foodLookingUp = true;
@@ -562,6 +634,8 @@ Use real nutritional data. For restaurant items use the actual menu item nutriti
         };
         ST.foodLookingUp = false;
         ST.foodResults = [food_entry];
+        // Auto-save to custom foods list so it appears in future searches
+        saveCustomFood(food_entry);
         // Pre-fill grams with the natural serving size
         ST.pendingServingGrams = sg;
         var modalEl2 = document.querySelector(".modal");
@@ -1134,6 +1208,19 @@ function buildFoodModalInner() {
     </div>
     <div class="fgrp">
       <label class="flbl">${ST.foodEntry.food.cat==="Claude Lookup" && ST.foodEntry.food.food_type!=="A" ? `Amount (grams) — typical serving: ${ST.foodEntry.food.serving_grams}g` : "Amount (grams)"}</label>
+      ${(()=>{
+        var qs = getQuickServings(ST.foodEntry.food.n);
+        if(!qs) return "";
+        return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+          ${qs.map(function(s){
+            var m = calcMacros(ST.foodEntry.food, s.g);
+            var active = String(ST.foodEntry.grams) === String(s.g);
+            return `<button class="quick-serving-btn" data-qg="${s.g}" style="padding:6px 12px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${active?"var(--accent)":"var(--border)"};background:${active?"rgba(79,142,247,.15)":"var(--bg3)"};color:${active?"var(--accent)":"var(--muted)"}">
+              ${s.label} <span style="font-weight:400;color:var(--muted)">(${s.g}g · ${m.cal}kcal)</span>
+            </button>`;
+          }).join("")}
+        </div>`;
+      })()}
       <input class="finput" type="number" inputmode="decimal" id="food-grams-input" placeholder="${ST.foodEntry.food.serving_grams||150}" value="${ST.foodEntry.grams}" autocomplete="off">
     </div>
     <div id="macro-preview" style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:var(--rs);padding:12px;margin-bottom:14px;${hasGrams?"":"display:none"}">${previewHTML}</div>
@@ -1176,6 +1263,26 @@ function buildCSTableHTML() {
 
 function renderCheatPanel() {
   const cats = ["All","Protein","Carbs","Fat","Vegetable","Dairy","Condiment","Supplement","Peruvian","Chinese","Mexican","Italian","American","Thai"];
+  const myFoodsHTML = ST.customFoods.length > 0 ? `
+    <div style="margin:0 16px 8px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--purple);margin-bottom:8px">🤖 My Saved Foods (${ST.customFoods.length})</div>
+      <div style="background:var(--bg2);border:1px solid rgba(168,85,247,.3);border-radius:var(--r);overflow:hidden">
+        ${ST.customFoods.map(f=>`
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border)">
+            <div style="flex:1">
+              <div style="font-weight:600;font-size:13px">${f.n}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">
+                ${f.serving_label && f.food_type!=="A"
+                  ? `${f.serving_label} · ${Math.round(f.cal*(f.serving_grams||100)/100)} kcal · P:${ri(Math.round(f.p*(f.serving_grams||100)/100))}g`
+                  : `${f.cal} kcal · P:${ri(f.p)}g C:${ri(f.c)}g F:${ri(f.f)}g per 100g`}
+              </div>
+            </div>
+            <button class="btn bp" style="font-size:11px;padding:6px 10px" data-prefill='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat||"Custom",serving_label:f.serving_label,serving_grams:f.serving_grams,food_type:f.food_type}).replace(/'/g,"&#39;")}'>+ Log</button>
+            <button data-del-custom="${f.n}" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:4px">×</button>
+          </div>`).join("")}
+      </div>
+    </div>` : "";
+
   return `<div class="moverlay" data-action="close-cheat">
     <div class="modal" onclick="event.stopPropagation()" style="max-height:92dvh;padding:16px 0 max(16px,env(safe-area-inset-bottom))">
       <div class="mhandle"></div>
@@ -1186,6 +1293,7 @@ function renderCheatPanel() {
       <div class="cs-search" style="margin:0 16px 8px"><div class="cs-icon">🔍</div><input id="cs-search-input" type="text" placeholder="Search foods…" value="${ST.csSearch}" autocomplete="off"></div>
       <div class="cs-filter" style="padding:0 16px 8px">${cats.map(c=>`<div class="cs-pill${ST.csFilter===c?" active":""}" data-cs-filter="${c}">${c}</div>`).join("")}</div>
       <div style="overflow-y:auto;flex:1">
+        ${myFoodsHTML}
         <div class="cs-table" style="margin:0 16px 16px">${buildCSTableHTML()}</div>
       </div>
     </div>
@@ -1562,6 +1670,13 @@ function attachAll() {
   // CHEAT SHEET PANEL
   $("[data-action='open-cheat']")?.addEventListener("click",()=>{ST.showCheatPanel=true;render();});
   $("[data-action='close-cheat']")?.addEventListener("click",()=>{ST.showCheatPanel=false;render();});
+  // Delete custom food
+  $$("[data-del-custom]").forEach(el=>el.addEventListener("click",e=>{
+    e.stopPropagation();
+    var name = el.dataset.delCustom;
+    ST.customFoods = ST.customFoods.filter(function(f){return f.n!==name;});
+    save(); render();
+  }));
 
   // HISTORY TAB TOGGLE (Log / PRs)
   $$("[data-htab]").forEach(el=>el.addEventListener("click",()=>{ST.historyTab=el.dataset.htab;render();}));
@@ -1575,6 +1690,16 @@ function attachAll() {
 function attachFoodModalInner() {
   var $ = function(sel){return document.querySelector(sel);};
   var $$ = function(sel){return document.querySelectorAll(sel);};
+
+  // Quick serving buttons
+  document.querySelectorAll(".quick-serving-btn").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      ST.foodEntry.grams = btn.dataset.qg;
+      // Rebuild modal to show active state + update preview
+      var modalEl = document.querySelector(".modal");
+      if(modalEl){ modalEl.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+    });
+  });
 
   // Search input — must be re-attached every time modal inner rebuilds
   var fsEl = document.getElementById("food-search-input");
@@ -1658,7 +1783,9 @@ function attachFoodModalInner() {
 // BOOT — load from Supabase, fall back to localStorage
 // ══════════════════════════════════════════════════
 function showLoader() {
-  document.getElementById("app").innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:16px;background:#0a0a0f"><div style="font-family:Arial Black,Arial,sans-serif;font-size:42px;letter-spacing:2px;color:#4f8ef7">DIEGO\'S</div><div style="font-family:Arial Black,Arial,sans-serif;font-size:22px;letter-spacing:1px;color:#6b6b88">FITNESS TRACKER</div><div style="width:40px;height:40px;border:3px solid #2a2a3a;border-top-color:#4f8ef7;border-radius:50%;animation:spin 1s linear infinite;margin-top:20px"></div><div style="font-size:13px;color:#6b6b88;margin-top:4px">Loading your data\u2026</div></div>';
+  var appEl = document.getElementById("app");
+  if(!appEl) return;
+  appEl.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:16px;background:#0a0a0f"><div style="font-family:Arial Black,Arial,sans-serif;font-size:42px;letter-spacing:2px;color:#4f8ef7">DIEGO\'S</div><div style="font-family:Arial Black,Arial,sans-serif;font-size:22px;letter-spacing:1px;color:#6b6b88">FITNESS TRACKER</div><div style="width:40px;height:40px;border:3px solid #2a2a3a;border-top-color:#4f8ef7;border-radius:50%;animation:spin 1s linear infinite;margin-top:20px"></div><div style="font-size:13px;color:#6b6b88;margin-top:4px">Loading your data\u2026</div></div>';
 }
 
 function loadFromCache() {
@@ -1713,7 +1840,11 @@ function boot() {
 window.addEventListener("error", function(e) { console.error("App error:", e); });
 window.addEventListener("unhandledrejection", function(e) { console.error("Promise error:", e); });
 
-boot();
+if(document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", boot);
+} else {
+  boot();
+}
 </script>
 </body>
 </html>
