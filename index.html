@@ -228,7 +228,15 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--font-b);heigh
 </head>
 <body>
 <div id="app"></div>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+// Load Chart.js dynamically — app works fine without it (charts just won't show)
+(function(){
+  var s = document.createElement("script");
+  s.src = "https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js";
+  s.onerror = function(){ console.log("Chart.js failed to load — charts disabled"); };
+  document.head.appendChild(s);
+})();
+</script>
 <script>
 // ══════════════════════════════════════════════════
 // SUPABASE CONFIG
@@ -522,13 +530,16 @@ const ST = {
   aiReports:     S.get("air", []),
   customFoods:   S.get("cf", []),  // foods saved from Claude lookups
   dailyLogs:     S.get("dl", []),  // sleep + steps per day
-  weekDay: null, // selected day in the This Week view
-  selectedMeasurement: "waist", // active measurement for body chart
+  weekDay: null,
+  selectedMeasurement: "waist",
+  chartRangeWB: 28,    // weight/BF chart range in days
+  chartRangeMeas: 28,  // measurements chart range in days
+  charts: {},
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {},
   restTimer: null,
   showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null,
   expandedLog: null,
-  foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""},
+  foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""}, photoLookingUp: false,
   nutTab: "today",
   csFilter: "All", csSearch: "", csExpanded: null,
   aiLoading: false, aiTab: "latest", aiExpandedReport: null,
@@ -729,6 +740,100 @@ Use real nutritional data. For restaurant items use the actual menu item nutriti
   ST.foodResults = [];
   var modalEl3 = document.querySelector(".modal");
   if(modalEl3) { modalEl3.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+}
+
+async function lookupFoodFromPhoto(file) {
+  ST.photoLookingUp = true;
+  var modalEl = document.querySelector(".modal");
+  if(modalEl) { modalEl.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+
+  try {
+    // Convert image to base64
+    var base64 = await new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function(){ resolve(reader.result.split(",")[1]); };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    var mediaType = file.type || "image/jpeg";
+
+    var resp = await fetch("https://fitness-proxy.leonsilvadiego.workers.dev", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5",
+        max_tokens: 500,
+        messages: [{
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "base64", media_type: mediaType, data: base64 }
+            },
+            {
+              type: "text",
+              text: `Look at this image and identify the food(s) shown. This could be:
+- A plate of food or meal (estimate portions based on what you see)
+- A nutrition label on a food package (read the exact values)
+- A single food item
+
+If it's a NUTRITION LABEL: read the values exactly as shown. Use the serving size on the label.
+If it's a PLATE/MEAL: identify the main components and estimate total macros for what's shown.
+If it's a SINGLE ITEM: identify it and estimate macros for a typical serving.
+
+Respond with ONLY a JSON object, no other text:
+{"name":"food name or meal description","cal":000,"p":00,"c":00,"f":00,"serving_label":"description of what was analyzed","serving_grams":000,"type":"A|B|C|D","notes":"optional brief note about confidence or estimation"}
+
+Where type: A=raw ingredient, B=restaurant/menu item, C=home meal/recipe, D=packaged food with label`
+            }
+          ]
+        }]
+      })
+    });
+
+    var rawText = await resp.text();
+    if(!resp.ok) throw new Error("Worker error " + resp.status);
+    var json = JSON.parse(rawText);
+    var text = (json.content && json.content[0] && json.content[0].text) || "";
+    var match = text.match(/\{[\s\S]*\}/);
+    if(match) {
+      var food = JSON.parse(match[0]);
+      if(food.name && food.cal !== undefined) {
+        var sg = food.serving_grams || 100;
+        var food_entry = {
+          n: food.name,
+          cal: Math.round((food.cal / sg) * 100),
+          p: Math.round((food.p / sg) * 100 * 10) / 10,
+          c: Math.round((food.c / sg) * 100 * 10) / 10,
+          f: Math.round((food.f / sg) * 100 * 10) / 10,
+          cat: "Photo Lookup",
+          serving_label: food.serving_label || "1 serving",
+          serving_grams: sg,
+          food_type: food.type || "C",
+          source: "photo",
+          notes: food.notes || ""
+        };
+        ST.photoLookingUp = false;
+        ST.foodResults = [food_entry];
+        // Pre-fill grams with serving size
+        ST.pendingServingGrams = sg;
+        // Auto-save to custom foods
+        saveCustomFood(food_entry, "photo");
+        var modalEl2 = document.querySelector(".modal");
+        if(modalEl2) { modalEl2.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+        return;
+      }
+    }
+    throw new Error("Could not parse food from image");
+  } catch(e) {
+    console.log("Photo lookup error:", e);
+    ST.photoLookingUp = false;
+    ST.foodResults = [];
+    alert("Couldn't identify food from photo. Try a clearer image or use the search instead.");
+    var modalEl4 = document.querySelector(".modal");
+    if(modalEl4) { modalEl4.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+  }
 }
 // Get last N sessions for a specific exercise
 function getExHistory(exId, exName, n) {
@@ -1020,7 +1125,7 @@ function fmtReport(t) {
 // ══════════════════════════════════════════════════
 function render() {
   // Destroy existing charts before rebuilding DOM
-  Object.values(ST.charts).forEach(c=>{try{c.destroy();}catch{}});
+  if(ST.charts) Object.values(ST.charts).forEach(c=>{try{c.destroy();}catch{}});
   ST.charts = {};
   document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}${ST.editingLog?renderEditLogModal():""}`;
   attachAll();
@@ -1467,9 +1572,8 @@ function renderNutToday(sum, entries, water, filled) {
     {label:"Fat",     val:ri(sum.f),  target:TARGETS.f,  color:"#eab308", unit:"g"},
   ];
   return `
-  <div style="padding:0 16px 12px;display:flex;gap:10px">
-    <button class="btn bp" style="flex:2" data-action="open-food">+ Log Food</button>
-    <button class="btn bg" style="flex:1" data-water="0.25">💧 +¼L</button>
+  <div style="padding:0 16px 12px">
+    <button class="btn bp bfull" data-action="open-food">+ Log Food</button>
   </div>
   <div class="card"><div class="ct">Today's Macros</div>${macroRows(sum)}</div>
   <div class="card">
@@ -1710,6 +1814,7 @@ function buildFoodModalInner() {
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
         <div class="fsr-name">${f.n}</div>
         ${f.cat==="Claude Lookup"?`<span style="font-size:10px;background:rgba(168,85,247,.15);color:var(--purple);padding:2px 6px;border-radius:99px;font-weight:700">🤖 AI</span>`:""}
+        ${f.cat==="Photo Lookup"?`<span style="font-size:10px;background:rgba(79,142,247,.15);color:var(--accent);padding:2px 6px;border-radius:99px;font-weight:700">📷 Photo</span>`:""}
       </div>
       <div class="fsr-macros">
         ${f.cat==="Claude Lookup" && f.food_type!=="A"
@@ -1726,6 +1831,22 @@ function buildFoodModalInner() {
   }
 
   return `
+    ${ST.photoLookingUp ? `
+    <div style="display:flex;align-items:center;gap:12px;padding:16px;background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.3);border-radius:var(--rs);margin-bottom:12px">
+      <div style="width:22px;height:22px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;flex-shrink:0"></div>
+      <div>
+        <div style="font-size:13px;font-weight:700;color:var(--accent)">Analyzing photo…</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">Claude is identifying the food and estimating macros</div>
+      </div>
+    </div>` : `
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);cursor:pointer;font-size:12px;font-weight:700;color:var(--accent)">
+        <input type="file" accept="image/*" capture id="food-photo-camera" style="display:none">📷 Take Photo
+      </label>
+      <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);cursor:pointer;font-size:12px;font-weight:700;color:var(--muted)">
+        <input type="file" accept="image/*" id="food-photo-library" style="display:none">🖼 Library
+      </label>
+    </div>`}
     <div class="fgrp">
       <label class="flbl">Search Food</label>
       <input class="finput" type="text" id="food-search-input" placeholder="e.g. chicken breast, ceviche, pad thai…" value="${ST.foodSearch}" autocomplete="off">
@@ -1848,9 +1969,13 @@ function renderCheatSheet() {
 // ── BODY STATS ─────────────────────────────────────
 function renderBody() {
   const stats=[...ST.bodyStats].sort((a,b)=>new Date(a.date)-new Date(b.date));
-  // Filter to last 4 weeks
-  const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-28);
-  const recent = stats.filter(s=>new Date(s.date+"T12:00:00")>=cutoff);
+  const ranges = [{v:28,l:"4W"},{v:56,l:"8W"},{v:180,l:"6M"},{v:365,l:"1Y"},{v:0,l:"All"}];
+  const cutoffWB = ST.chartRangeWB===0 ? new Date(0) : new Date();
+  if(ST.chartRangeWB>0) cutoffWB.setDate(cutoffWB.getDate()-ST.chartRangeWB);
+  const cutoffMeas = ST.chartRangeMeas===0 ? new Date(0) : new Date();
+  if(ST.chartRangeMeas>0) cutoffMeas.setDate(cutoffMeas.getDate()-ST.chartRangeMeas);
+  const recentWB   = stats.filter(s=>new Date(s.date+"T12:00:00")>=cutoffWB);
+  const recentMeas = stats.filter(s=>new Date(s.date+"T12:00:00")>=cutoffMeas);
 
   const measurements = [
     {key:"waist",  label:"Waist"},
@@ -1861,8 +1986,8 @@ function renderBody() {
     {key:"r_thigh",label:"R Thigh"},
     {key:"l_thigh",label:"L Thigh"},
   ];
-  const hasAnyMeasurement = recent.some(s=>measurements.some(m=>s[m.key]));
-  const hasWeightData = recent.length >= 2;
+  const hasAnyMeasurement = recentMeas.some(s=>measurements.some(m=>s[m.key]));
+  const hasWeightData = recentWB.length >= 2;
 
   return `
   <div class="ph"><div class="pt">BODY STATS</div><div class="ps">Track weight, body fat & measurements</div></div>
@@ -1870,7 +1995,12 @@ function renderBody() {
 
   ${hasWeightData?`
   <div class="card" style="margin-top:12px">
-    <div class="ct">Weight & Body Fat — Last 4 Weeks</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div class="ct" style="margin-bottom:0">Weight & Body Fat</div>
+      <div style="display:flex;gap:4px">
+        ${ranges.map(r=>`<button data-range-wb="${r.v}" style="padding:4px 8px;border-radius:var(--rs);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${ST.chartRangeWB===r.v?"var(--accent)":"var(--border)"};background:${ST.chartRangeWB===r.v?"rgba(79,142,247,.15)":"var(--bg3)"};color:${ST.chartRangeWB===r.v?"var(--accent)":"var(--muted)"}">${r.l}</button>`).join("")}
+      </div>
+    </div>
     <div style="position:relative;height:220px">
       <canvas id="chart-wb"></canvas>
     </div>
@@ -1882,9 +2012,14 @@ function renderBody() {
 
   ${hasAnyMeasurement?`
   <div class="card">
-    <div class="ct">Measurements — Last 4 Weeks</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div class="ct" style="margin-bottom:0">Body Measurements (inches)</div>
+      <div style="display:flex;gap:4px">
+        ${ranges.map(r=>`<button data-range-meas="${r.v}" style="padding:4px 8px;border-radius:var(--rs);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${ST.chartRangeMeas===r.v?"var(--accent)":"var(--border)"};background:${ST.chartRangeMeas===r.v?"rgba(79,142,247,.15)":"var(--bg3)"};color:${ST.chartRangeMeas===r.v?"var(--accent)":"var(--muted)"}">${r.l}</button>`).join("")}
+      </div>
+    </div>
     <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
-      ${measurements.filter(m=>recent.some(s=>s[m.key])).map(m=>`
+      ${measurements.filter(m=>recentMeas.some(s=>s[m.key])).map(m=>`
         <button data-meas="${m.key}" style="padding:6px 12px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${ST.selectedMeasurement===m.key?"var(--accent)":"var(--border)"};background:${ST.selectedMeasurement===m.key?"rgba(79,142,247,.15)":"var(--bg3)"};color:${ST.selectedMeasurement===m.key?"var(--accent)":"var(--muted)"}">
           ${m.label}
         </button>`).join("")}
@@ -2037,105 +2172,59 @@ function renderEditLogModal() {
 // ══════════════════════════════════════════════════
 function mkLine() {}
 
-function renderCharts() {
-  if(ST.tab !== "body") return;
-  if(typeof Chart === "undefined") return;
-
-  const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-28);
-  const stats = [...ST.bodyStats]
+function getFilteredStats(rangeDays) {
+  const cutoff = rangeDays===0 ? new Date(0) : new Date();
+  if(rangeDays>0) cutoff.setDate(cutoff.getDate()-rangeDays);
+  return [...ST.bodyStats]
     .sort((a,b)=>new Date(a.date)-new Date(b.date))
     .filter(s=>new Date(s.date+"T12:00:00")>=cutoff);
+}
 
-  if(stats.length < 2) return;
-
-  const labels = stats.map(s=>new Date(s.date+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"}));
-  const gridColor = "#2a2a3a";
-  const tickColor = "#6b6b88";
-
-  // Chart 1: Weight (left axis) + Body Fat % (right axis)
+function renderChartWB() {
+  if(ST.tab!=="body" || typeof Chart==="undefined") return;
   const wbEl = document.getElementById("chart-wb");
-  if(wbEl && !ST.charts["chart-wb"]) {
-    ST.charts["chart-wb"] = new Chart(wbEl.getContext("2d"), {
-      data: {
-        labels,
-        datasets: [
-          {
-            type:"line", label:"Weight (lbs)",
-            data: stats.map(s=>s.weight||null),
-            borderColor:"#4f8ef7", backgroundColor:"rgba(79,142,247,.1)",
-            borderWidth:2.5, pointBackgroundColor:"#4f8ef7", pointRadius:4,
-            fill:true, tension:.35, spanGaps:true, yAxisID:"y"
-          },
-          {
-            type:"line", label:"Body Fat %",
-            data: stats.map(s=>s.bf||null),
-            borderColor:"#ef4444", backgroundColor:"rgba(239,68,68,.0)",
-            borderWidth:2.5, pointBackgroundColor:"#ef4444", pointRadius:4,
-            fill:false, tension:.35, spanGaps:true, yAxisID:"y2"
-          }
-        ]
-      },
-      options: {
-        responsive:true, maintainAspectRatio:false,
-        interaction:{mode:"index", intersect:false},
-        plugins:{legend:{display:false}, tooltip:{
-          backgroundColor:"rgba(18,18,26,.95)", borderColor:"#2a2a3a", borderWidth:1,
-          titleColor:"#f0f0f8", bodyColor:"#9090aa",
-          callbacks:{label:function(ctx){return ctx.dataset.label+": "+ctx.parsed.y+(ctx.datasetIndex===1?"%":" lbs");}}
-        }},
-        scales:{
-          x:{ticks:{color:tickColor,font:{size:9},maxRotation:45}, grid:{color:gridColor}},
-          y:{
-            position:"left", ticks:{color:"#4f8ef7",font:{size:9},callback:v=>v+" lbs"},
-            grid:{color:gridColor},
-            title:{display:true,text:"Weight",color:"#4f8ef7",font:{size:10}}
-          },
-          y2:{
-            position:"right", ticks:{color:"#ef4444",font:{size:9},callback:v=>v+"%"},
-            grid:{drawOnChartArea:false},
-            title:{display:true,text:"Body Fat %",color:"#ef4444",font:{size:10}}
-          }
-        }
-      }
-    });
-  }
+  if(!wbEl) return;
+  const stats = getFilteredStats(ST.chartRangeWB);
+  if(stats.length < 2) return;
+  const labels = stats.map(s=>new Date(s.date+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"}));
+  const gridColor="#2a2a3a", tickColor="#6b6b88";
+  if(ST.charts["chart-wb"]){try{ST.charts["chart-wb"].destroy();}catch{} delete ST.charts["chart-wb"];}
+  ST.charts["chart-wb"] = new Chart(wbEl.getContext("2d"), {
+    data:{labels, datasets:[
+      {type:"line",label:"Weight (lbs)",data:stats.map(s=>s.weight||null),borderColor:"#4f8ef7",backgroundColor:"rgba(79,142,247,.1)",borderWidth:2.5,pointBackgroundColor:"#4f8ef7",pointRadius:4,fill:true,tension:.35,spanGaps:true,yAxisID:"y"},
+      {type:"line",label:"Body Fat %",data:stats.map(s=>s.bf||null),borderColor:"#ef4444",backgroundColor:"rgba(239,68,68,.0)",borderWidth:2.5,pointBackgroundColor:"#ef4444",pointRadius:4,fill:false,tension:.35,spanGaps:true,yAxisID:"y2"}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:"index",intersect:false},
+      plugins:{legend:{display:false},tooltip:{backgroundColor:"rgba(18,18,26,.95)",borderColor:"#2a2a3a",borderWidth:1,titleColor:"#f0f0f8",bodyColor:"#9090aa",callbacks:{label:function(ctx){return ctx.dataset.label+": "+ctx.parsed.y+(ctx.datasetIndex===1?"%":" lbs");}}}},
+      scales:{x:{ticks:{color:tickColor,font:{size:9},maxRotation:45},grid:{color:gridColor}},y:{position:"left",ticks:{color:"#4f8ef7",font:{size:9},callback:v=>v+" lbs"},grid:{color:gridColor},title:{display:true,text:"Weight",color:"#4f8ef7",font:{size:10}}},y2:{position:"right",ticks:{color:"#ef4444",font:{size:9},callback:v=>v+"%"},grid:{drawOnChartArea:false},title:{display:true,text:"Body Fat %",color:"#ef4444",font:{size:10}}}}}
+  });
+}
 
-  // Chart 2: Selected measurement
+function renderChartMeas() {
+  if(ST.tab!=="body" || typeof Chart==="undefined") return;
   const measEl = document.getElementById("chart-meas");
-  if(measEl) {
-    const measKey = ST.selectedMeasurement || "waist";
-    const measLabels = {waist:"Waist",hips:"Hips",chest:"Chest",r_arm:"Right Arm",l_arm:"Left Arm",r_thigh:"Right Thigh",l_thigh:"Left Thigh"};
-    const measColors = {waist:"#f97316",hips:"#a855f7",chest:"#06b6d4",r_arm:"#22c55e",l_arm:"#4f8ef7",r_thigh:"#eab308",l_thigh:"#ef4444"};
-    const color = measColors[measKey] || "#4f8ef7";
-    const label = measLabels[measKey] || measKey;
+  if(!measEl) return;
+  const stats = getFilteredStats(ST.chartRangeMeas);
+  if(stats.length < 2) return;
+  const labels = stats.map(s=>new Date(s.date+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"}));
+  const gridColor="#2a2a3a", tickColor="#6b6b88";
+  const measKey=ST.selectedMeasurement||"waist";
+  const measLabels={waist:"Waist",hips:"Hips",chest:"Chest",r_arm:"Right Arm",l_arm:"Left Arm",r_thigh:"Right Thigh",l_thigh:"Left Thigh"};
+  const measColors={waist:"#f97316",hips:"#a855f7",chest:"#06b6d4",r_arm:"#22c55e",l_arm:"#4f8ef7",r_thigh:"#eab308",l_thigh:"#ef4444"};
+  const color=measColors[measKey]||"#4f8ef7", label=measLabels[measKey]||measKey;
+  if(ST.charts["chart-meas"]){try{ST.charts["chart-meas"].destroy();}catch{} delete ST.charts["chart-meas"];}
+  ST.charts["chart-meas"] = new Chart(measEl.getContext("2d"), {
+    type:"line",
+    data:{labels,datasets:[{label:label+" (inches)",data:stats.map(s=>s[measKey]||null),borderColor:color,backgroundColor:color+"22",borderWidth:2.5,pointBackgroundColor:color,pointRadius:4,fill:true,tension:.35,spanGaps:true}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{backgroundColor:"rgba(18,18,26,.95)",borderColor:"#2a2a3a",borderWidth:1,titleColor:"#f0f0f8",bodyColor:"#9090aa",callbacks:{label:function(ctx){return label+": "+ctx.parsed.y+'"';}}}},
+      scales:{x:{ticks:{color:tickColor,font:{size:9},maxRotation:45},grid:{color:gridColor}},y:{ticks:{color:tickColor,font:{size:9},callback:v=>v+'"'},grid:{color:gridColor}}}}
+  });
+}
 
-    if(ST.charts["chart-meas"]) { try{ST.charts["chart-meas"].destroy();}catch{} }
-    ST.charts["chart-meas"] = new Chart(measEl.getContext("2d"), {
-      type:"line",
-      data:{
-        labels,
-        datasets:[{
-          label:label+" (inches)",
-          data:stats.map(s=>s[measKey]||null),
-          borderColor:color, backgroundColor:color+"22",
-          borderWidth:2.5, pointBackgroundColor:color, pointRadius:4,
-          fill:true, tension:.35, spanGaps:true
-        }]
-      },
-      options:{
-        responsive:true, maintainAspectRatio:false,
-        plugins:{legend:{display:false}, tooltip:{
-          backgroundColor:"rgba(18,18,26,.95)", borderColor:"#2a2a3a", borderWidth:1,
-          titleColor:"#f0f0f8", bodyColor:"#9090aa",
-          callbacks:{label:function(ctx){return label+": "+ctx.parsed.y+'"';}}
-        }},
-        scales:{
-          x:{ticks:{color:tickColor,font:{size:9},maxRotation:45},grid:{color:gridColor}},
-          y:{ticks:{color:tickColor,font:{size:9},callback:v=>v+'"'},grid:{color:gridColor}}
-        }
-      }
-    });
-  }
+function renderCharts() {
+  renderChartWB();
+  renderChartMeas();
 }
 
 // ══════════════════════════════════════════════════
@@ -2386,12 +2475,40 @@ function attachAll() {
     }
   }));
 
-  // MEASUREMENT CHART SELECTOR
+  // MEASUREMENT SELECTOR — only redraws measurement chart
   $$("[data-meas]").forEach(el=>el.addEventListener("click",()=>{
     ST.selectedMeasurement=el.dataset.meas;
-    // Destroy measurement chart so renderCharts rebuilds it
-    if(ST.charts["chart-meas"]){try{ST.charts["chart-meas"].destroy();}catch{} delete ST.charts["chart-meas"];}
-    render();
+    $$("[data-meas]").forEach(b=>{
+      const a=b.dataset.meas===ST.selectedMeasurement;
+      b.style.borderColor=a?"var(--accent)":"var(--border)";
+      b.style.background=a?"rgba(79,142,247,.15)":"var(--bg3)";
+      b.style.color=a?"var(--accent)":"var(--muted)";
+    });
+    renderChartMeas();
+  }));
+
+  // WEIGHT/BF CHART RANGE — only redraws weight chart
+  $$("[data-range-wb]").forEach(el=>el.addEventListener("click",()=>{
+    ST.chartRangeWB=parseInt(el.dataset.rangeWb);
+    $$("[data-range-wb]").forEach(b=>{
+      const a=parseInt(b.dataset.rangeWb)===ST.chartRangeWB;
+      b.style.borderColor=a?"var(--accent)":"var(--border)";
+      b.style.background=a?"rgba(79,142,247,.15)":"var(--bg3)";
+      b.style.color=a?"var(--accent)":"var(--muted)";
+    });
+    renderChartWB();
+  }));
+
+  // MEASUREMENTS CHART RANGE — only redraws measurements chart
+  $$("[data-range-meas]").forEach(el=>el.addEventListener("click",()=>{
+    ST.chartRangeMeas=parseInt(el.dataset.rangeMeas);
+    $$("[data-range-meas]").forEach(b=>{
+      const a=parseInt(b.dataset.rangeMeas)===ST.chartRangeMeas;
+      b.style.borderColor=a?"var(--accent)":"var(--border)";
+      b.style.background=a?"rgba(79,142,247,.15)":"var(--bg3)";
+      b.style.color=a?"var(--accent)":"var(--muted)";
+    });
+    renderChartMeas();
   }));
 
   // BODY MODAL
@@ -2595,7 +2712,17 @@ function attachFoodModalInner() {
   var $ = function(sel){return document.querySelector(sel);};
   var $$ = function(sel){return document.querySelectorAll(sel);};
 
-  // Quick serving buttons
+  // PHOTO INPUTS — camera and library
+  var camEl = document.getElementById("food-photo-camera");
+  var libEl = document.getElementById("food-photo-library");
+  [camEl, libEl].forEach(function(el){
+    if(!el) return;
+    el.addEventListener("change", function(){
+      var file = el.files[0];
+      if(!file) return;
+      lookupFoodFromPhoto(file);
+    });
+  });
   document.querySelectorAll(".quick-serving-btn").forEach(function(btn){
     btn.addEventListener("click", function(){
       ST.foodEntry.grams = btn.dataset.qg;
