@@ -429,6 +429,47 @@ function saveAIReport(r)        { save(); }
 function deleteFromCloud(t, id) {}
 function syncToCloud(t, r)      {}
 
+// ══════════════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════════════
+function fmtDate(iso) { return new Date(iso+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); }
+function today()      { return new Date().toISOString().split("T")[0]; }
+function getToday()   { return new Date().toLocaleDateString("en-US",{weekday:"short"}).toUpperCase().slice(0,3); }
+function weekMon()    { var d=new Date(); d.setDate(d.getDate()-((d.getDay()+6)%7)); d.setHours(0,0,0,0); return d; }
+function weekLogs()   { var m=weekMon(); return ST.workoutLogs.filter(function(l){return new Date(l.date+"T12:00:00")>=m;}); }
+function getLean(w,bf){ return bf ? +(w*(1-bf/100)).toFixed(1) : null; }
+function daysAgo(iso) { return Math.round((Date.now()-new Date(iso+"T12:00:00"))/(86400000)); }
+function weekNum()    { var d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+3-(d.getDay()+6)%7); var w1=new Date(d.getFullYear(),0,4); return 1+Math.round(((d-w1)/86400000-3+(w1.getDay()+6)%7)/7); }
+function nutByDate(date) { return ST.nutritionLogs.filter(function(l){return l.date===date&&l.type==="food";}); }
+function nutSum(entries)  { return entries.reduce(function(a,e){return {cal:a.cal+(e.cal||0),p:a.p+(e.p||0),c:a.c+(e.c||0),f:a.f+(e.f||0)};},{cal:0,p:0,c:0,f:0}); }
+function todayWater()     { var l=ST.nutritionLogs.find(function(l){return l.date===today()&&l.type==="water";}); return l?l.liters:0; }
+function calcMacros(food,grams) { var g=parseFloat(grams)||0,r=g/100; return {cal:Math.round(food.cal*r),p:Math.round(food.p*r*10)/10,c:Math.round(food.c*r*10)/10,f:Math.round(food.f*r*10)/10}; }
+function searchFoods(q)   { if(!q||q.length<2) return []; var ql=q.toLowerCase(); return FOODS.filter(function(f){return f.n.toLowerCase().indexOf(ql)>=0;}).slice(0,8); }
+function getPRs() {
+  var p = {};
+  ST.workoutLogs.forEach(function(log){
+    (log.exercises||[]).forEach(function(ex){
+      (ex.sets||[]).forEach(function(set){
+        var w=parseFloat(set.weight); if(!w) return;
+        if(!p[ex.name]||w>p[ex.name].weight) p[ex.name]={weight:w,date:log.date,dayId:log.dayId};
+      });
+    });
+  });
+  return Object.entries(p).sort(function(a,b){return b[1].weight-a[1].weight;});
+}
+function getVolume(log) {
+  return (log.exercises||[]).reduce(function(t,e){return t+(e.sets||[]).reduce(function(s,set){return s+(parseFloat(set.weight)||0)*(parseFloat(set.reps)||0);},0);},0);
+}
+function proteinStreak() {
+  var days=[];
+  for(var i=13;i>=0;i--){
+    var d=new Date(); d.setDate(d.getDate()-i);
+    var ds=d.toISOString().split("T")[0];
+    var sum=nutSum(nutByDate(ds));
+    days.push({date:ds,label:new Date(ds+"T12:00:00").toLocaleDateString("en-US",{weekday:"short"}).slice(0,1),hit:sum.p>=TARGETS.p,logged:sum.p>0});
+  }
+  return days;
+}
 
 // ══════════════════════════════════════════════════
 // DATA EXPORT / IMPORT
