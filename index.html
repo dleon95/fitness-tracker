@@ -229,8 +229,32 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--font-b);heigh
 <div id="app"></div>
 <script>
 // ══════════════════════════════════════════════════
-// STORAGE — localStorage only
+// SUPABASE CONFIG
 // ══════════════════════════════════════════════════
+var SUPA_URL = "https://cpjwxsanjxafozzdewrd.supabase.co";
+var SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwand4c2FuanhhZm96emRld3JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNDMxMTQsImV4cCI6MjA5MzkxOTExNH0.OXgHDAtv40Oy8CaREnGH6t7gX4dhR9Geca8dAWNkrQk";
+
+function sbHeaders() {
+  return { "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY, "Content-Type": "application/json" };
+}
+function sbSelect(table) {
+  return fetch(SUPA_URL + "/rest/v1/" + table + "?select=*&order=created_at.desc", { headers: sbHeaders() })
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .catch(function() { return null; });
+}
+function sbUpsert(table, row) {
+  return fetch(SUPA_URL + "/rest/v1/" + table, {
+    method: "POST",
+    headers: Object.assign({}, sbHeaders(), { "Prefer": "resolution=merge-duplicates" }),
+    body: JSON.stringify(row)
+  }).then(function(r) { return r.ok; }).catch(function() { return false; });
+}
+function sbDelete(table, id) {
+  return fetch(SUPA_URL + "/rest/v1/" + table + "?id=eq." + id, {
+    method: "DELETE", headers: sbHeaders()
+  }).then(function(r) { return r.ok; }).catch(function() { return false; });
+}
+
 // ══════════════════════════════════════════════════
 // STORAGE — localStorage as cache, Supabase as source of truth
 // ══════════════════════════════════════════════════
@@ -421,13 +445,28 @@ function save() {
   S.set("air", ST.aiReports);
   ["wl","bs","nl","air"].forEach(k => { try { if(localStorage.getItem(k)) localStorage.removeItem(k); } catch {} });
 }
-function saveWorkoutLog(log)    { save(); }
-function saveBodyStat(stat)     { save(); }
-function saveNutritionLog(e)    { save(); }
-function saveWaterLog(e)        { save(); }
-function saveAIReport(r)        { save(); }
-function deleteFromCloud(t, id) {}
-function syncToCloud(t, r)      {}
+function saveWorkoutLog(log) {
+  save();
+  sbUpsert("workout_logs", { id:log.id, day_id:log.dayId, date:log.date, duration:log.duration, exercises:log.exercises });
+}
+function saveBodyStat(stat) {
+  save();
+  sbUpsert("body_stats", { id:stat.id, date:stat.date, weight:stat.weight, bf:stat.bf, waist:stat.waist, sleep:stat.sleep, notes:stat.notes });
+}
+function saveNutritionLog(entry) {
+  save();
+  sbUpsert("nutrition_logs", { id:entry.id, date:entry.date, type:entry.type, name:entry.name||null, grams:entry.grams||null, cal:entry.cal||null, p:entry.p||null, c:entry.c||null, f:entry.f||null, liters:entry.liters||null });
+}
+function saveWaterLog(entry) {
+  save();
+  sbUpsert("nutrition_logs", { id:entry.id, date:entry.date, type:"water", liters:entry.liters });
+}
+function saveAIReport(report) {
+  save();
+  sbUpsert("ai_reports", { id:report.id, date:report.date, report:report.report, snapshot:report.snapshot });
+}
+function deleteFromCloud(table, id) { sbDelete(table, id); }
+function syncToCloud(t, r)          { sbUpsert(t, r); }
 
 // ══════════════════════════════════════════════════
 // UTILS
@@ -666,7 +705,7 @@ function renderDashboard() {
   const wl=weekLogs(), sum=nutSum(nutByDate(today()));
   const wDelta=latest.weight&&prev.weight?(latest.weight-prev.weight).toFixed(1):null;
   return `
-  <div class="ph"><div class="pt">DIEGO'S TRACKER</div><div class="ps">Week ${weekNum()} · ${wl.length}/6 sessions this week</div></div>
+  <div class="ph"><div class="pt">DIEGO'S TRACKER</div><div class="ps">Week ${weekNum()} · ${wl.length}/6 sessions · <span style="color:${ST.online?'var(--green)':'var(--orange)'}">${ST.online?'● Cloud sync on':'● Offline'}</span></div></div>
   <div class="wbanner"><div class="wname">LET'S GO,<br>DIEGO.</div><div class="wsub">${latest.weight?`${latest.weight} lbs · ${latest.bf}% BF · ${getLean(latest.weight,latest.bf)||"—"} lbs lean mass`:"Tap Body tab to log your first entry"}</div></div>
   <div class="sgrid">
     <div class="sc"><div class="sl">Weight</div><div class="sv" style="color:#4f8ef7">${latest.weight||"—"}</div><div class="su">lbs</div>${wDelta!==null?`<div class="sd ${parseFloat(wDelta)<=0?"dg":"db"}">${parseFloat(wDelta)>0?"+":""}${wDelta} lbs</div>`:""}</div>
@@ -1181,21 +1220,63 @@ function attachFoodModal() {
 }
 
 // ══════════════════════════════════════════════════
+// BOOT — load from Supabase, fall back to localStorage
 // ══════════════════════════════════════════════════
-// BOOT — load from Supabase, fall back to localStorage cache
-// ══════════════════════════════════════════════════
-function boot() {
+function showLoader() {
+  document.getElementById("app").innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:16px;background:#0a0a0f"><div style="font-family:Arial Black,Arial,sans-serif;font-size:42px;letter-spacing:2px;color:#4f8ef7">DIEGO\'S</div><div style="font-family:Arial Black,Arial,sans-serif;font-size:22px;letter-spacing:1px;color:#6b6b88">FITNESS TRACKER</div><div style="width:40px;height:40px;border:3px solid #2a2a3a;border-top-color:#4f8ef7;border-radius:50%;animation:spin 1s linear infinite;margin-top:20px"></div><div style="font-size:13px;color:#6b6b88;margin-top:4px">Loading your data\u2026</div></div>';
+}
+
+function loadFromCache() {
   ST.workoutLogs   = S.get("wl", []);
-  ST.bodyStats     = S.get("bs", [{id:"init", date:new Date().toISOString().split("T")[0], weight:170, bf:19, waist:null, notes:"Starting point"}]);
+  ST.bodyStats     = S.get("bs", [{id:"init", date:new Date().toISOString().split("T")[0], weight:173, bf:19, waist:null, notes:"Starting point"}]);
   ST.nutritionLogs = S.get("nl", []);
   ST.aiReports     = S.get("air", []);
   ST.online        = false;
-  render();
+}
+
+function boot() {
+  showLoader();
+
+  // Set a 6 second timeout — if Supabase doesn't respond, use cache
+  var timer = setTimeout(function() {
+    loadFromCache();
+    render();
+  }, 6000);
+
+  Promise.all([
+    sbSelect("workout_logs"),
+    sbSelect("body_stats"),
+    sbSelect("nutrition_logs"),
+    sbSelect("ai_reports")
+  ]).then(function(results) {
+    clearTimeout(timer);
+    var wl = results[0], bs = results[1], nl = results[2], air = results[3];
+
+    if(wl !== null) {
+      ST.workoutLogs   = wl.map(function(r)  { return {id:r.id, dayId:r.day_id, date:r.date, duration:r.duration, exercises:r.exercises||[]}; });
+      ST.bodyStats     = bs.map(function(r)  { return {id:r.id, date:r.date, weight:r.weight, bf:r.bf, waist:r.waist, sleep:r.sleep, notes:r.notes}; });
+      ST.nutritionLogs = nl.map(function(r)  { return {id:r.id, date:r.date, type:r.type, name:r.name, grams:r.grams, cal:r.cal, p:r.p, c:r.c, f:r.f, liters:r.liters}; });
+      ST.aiReports     = air.map(function(r) { return {id:r.id, date:r.date, report:r.report, snapshot:r.snapshot}; });
+      // Update local cache
+      S.set("wl",  ST.workoutLogs);
+      S.set("bs",  ST.bodyStats);
+      S.set("nl",  ST.nutritionLogs);
+      S.set("air", ST.aiReports);
+      ST.online = true;
+    } else {
+      loadFromCache();
+    }
+    render();
+  }).catch(function() {
+    clearTimeout(timer);
+    loadFromCache();
+    render();
+  });
 }
 
 // Global safety net
-window.addEventListener("error", e => { console.error("App error:", e); try { render(); } catch {} });
-window.addEventListener("unhandledrejection", e => { console.error("Promise error:", e); try { render(); } catch {} });
+window.addEventListener("error", function(e) { console.error("App error:", e); });
+window.addEventListener("unhandledrejection", function(e) { console.error("Promise error:", e); });
 
 boot();
 </script>
