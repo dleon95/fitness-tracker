@@ -506,7 +506,7 @@ async function lookupFoodWithClaude(query) {
   if(modalEl) { modalEl.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
 
   try {
-    var resp = await fetch("https://api.anthropic.com/v1/messages", {
+    var resp = await fetch("https://fitness-proxy.leonsilvadiego.workers.dev", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
@@ -680,7 +680,7 @@ Provide evaluation with these exact sections:
 Be direct and specific. Use his actual numbers. No generic advice.`;
 
   try {
-    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    const resp = await fetch("https://fitness-proxy.leonsilvadiego.workers.dev", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({model:"claude-sonnet-4-20250514", max_tokens:1500, messages:[{role:"user",content:prompt}]})
     });
