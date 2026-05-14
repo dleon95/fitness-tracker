@@ -22,10 +22,10 @@
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{background:var(--bg);color:var(--text);font-family:var(--font-b);height:100%;overflow:hidden;overscroll-behavior:none}
 #app{display:flex;flex-direction:column;height:100dvh;max-width:480px;margin:0 auto;position:relative;overflow:hidden}
-.page{flex:1;overflow-y:auto;overflow-x:hidden;padding-bottom:84px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.page{flex:1;overflow-y:auto;overflow-x:hidden;padding-bottom:100px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .page::-webkit-scrollbar{display:none}
 /* NAV */
-.bnav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:rgba(18,18,26,.97);backdrop-filter:blur(20px);border-top:1px solid var(--border);display:flex;padding:6px 0 max(6px,env(safe-area-inset-bottom));z-index:100}
+.bnav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:rgba(18,18,26,.97);backdrop-filter:blur(20px);border-top:1px solid var(--border);display:flex;padding:8px 0 max(16px,env(safe-area-inset-bottom));z-index:100}
 .nb{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;color:var(--muted);cursor:pointer;padding:4px 0;transition:color .2s;font-family:var(--font-b)}
 .nb.active{color:var(--accent)}
 .ni{font-size:17px;line-height:1}.nl{font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase}
@@ -91,7 +91,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--font-b);heigh
 .schk:active{transform:scale(.92)}
 .add-set{width:100%;padding:8px;background:none;border:1px dashed var(--border);border-radius:var(--rs);color:var(--muted);font-family:var(--font-b);font-size:12px;font-weight:600;cursor:pointer;margin-top:2px}
 /* WORKOUT ACTION BAR - fixed at bottom above nav */
-.wact{padding:14px 16px;display:flex;gap:10px;position:fixed;bottom:calc(52px + max(6px,env(safe-area-inset-bottom)));left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:rgba(10,10,15,.97);backdrop-filter:blur(20px);border-top:1px solid var(--border);z-index:20}
+.wact{padding:14px 16px;display:flex;gap:10px;position:fixed;bottom:calc(68px + max(16px,env(safe-area-inset-bottom)));left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:rgba(10,10,15,.97);backdrop-filter:blur(20px);border-top:1px solid var(--border);z-index:20}
 /* REST TIMER */
 .rtimer{position:fixed;bottom:calc(120px + max(6px,env(safe-area-inset-bottom)));left:50%;transform:translateX(-50%);width:calc(100% - 32px);max-width:448px;background:var(--bg3);border:1px solid var(--accent);border-radius:var(--r);padding:12px 16px;display:flex;align-items:center;gap:12px;z-index:50;box-shadow:0 8px 32px rgba(79,142,247,.25);animation:sup .25s ease}
 @keyframes sup{from{transform:translateX(-50%) translateY(20px);opacity:0}}
@@ -228,6 +228,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--font-b);heigh
 </head>
 <body>
 <div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 // ══════════════════════════════════════════════════
 // SUPABASE CONFIG
@@ -520,9 +521,12 @@ const ST = {
   nutritionLogs: S.get("nl", []),
   aiReports:     S.get("air", []),
   customFoods:   S.get("cf", []),  // foods saved from Claude lookups
+  dailyLogs:     S.get("dl", []),  // sleep + steps per day
+  weekDay: null, // selected day in the This Week view
+  selectedMeasurement: "waist", // active measurement for body chart
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {},
   restTimer: null,
-  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null,
+  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null,
   expandedLog: null,
   foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""},
   nutTab: "today",
@@ -536,7 +540,33 @@ function save() {
   S.set("nl",  ST.nutritionLogs);
   S.set("air", ST.aiReports);
   S.set("cf",  ST.customFoods);
+  S.set("dl",  ST.dailyLogs);
   ["wl","bs","nl","air"].forEach(k => { try { if(localStorage.getItem(k)) localStorage.removeItem(k); } catch {} });
+}
+
+function saveCustomFoodToCloud(f) {
+  sbUpsert("custom_foods", {id:f.id||f.n.replace(/\s+/g,"_").toLowerCase(), name:f.n, cal:f.cal, p:f.p, c:f.c, f:f.f, cat:f.cat||"Custom", serving_label:f.serving_label||null, serving_grams:f.serving_grams||null, food_type:f.food_type||"A", created_at:clientTs()});
+}
+
+function saveDailyLog(entry) {
+  save();
+  sbUpsert("daily_logs", {id:entry.id, date:entry.date, steps:entry.steps||null, sleep_hours:entry.sleep_hours||null, created_at:clientTs()});
+}
+
+function getDailyLog(date) {
+  return ST.dailyLogs.find(function(l){ return l.date===date; }) || null;
+}
+
+function upsertDailyLog(date, updates) {
+  var existing = getDailyLog(date);
+  if(existing) {
+    Object.assign(existing, updates);
+    saveDailyLog(existing);
+  } else {
+    var entry = Object.assign({id: date, date: date}, updates);
+    ST.dailyLogs.unshift(entry);
+    saveDailyLog(entry);
+  }
 }
 function clientTs() {
   // Return timestamp in local timezone (not UTC) so Supabase stores the correct local time
@@ -600,20 +630,21 @@ function searchFoods(q) {
   return results.slice(0, 8);
 }
 
-function saveCustomFood(food_entry) {
+function saveCustomFood(food_entry, source) {
   // Don't save if already in built-in database
   var inDB = FOODS.some(function(f){ return f.n.toLowerCase() === food_entry.n.toLowerCase(); });
   if(inDB) return;
-  // Don't duplicate custom foods
+  food_entry.source = source || food_entry.source || "claude"; // "claude" or "manual"
+  if(!food_entry.id) food_entry.id = food_entry.n.replace(/\s+/g,"_").toLowerCase() + "_" + Date.now();
   var exists = ST.customFoods.some(function(f){ return f.n.toLowerCase() === food_entry.n.toLowerCase(); });
   if(exists) {
-    // Update existing entry with latest data
     var idx = ST.customFoods.findIndex(function(f){ return f.n.toLowerCase() === food_entry.n.toLowerCase(); });
     if(idx >= 0) ST.customFoods[idx] = food_entry;
   } else {
     ST.customFoods.unshift(food_entry);
   }
   save();
+  saveCustomFoodToCloud(food_entry);
 }
 
 async function lookupFoodWithClaude(query) {
@@ -699,6 +730,168 @@ Use real nutritional data. For restaurant items use the actual menu item nutriti
   var modalEl3 = document.querySelector(".modal");
   if(modalEl3) { modalEl3.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
 }
+// Get last N sessions for a specific exercise
+function getExHistory(exId, exName, n) {
+  var history = [];
+  for(var i = 0; i < ST.workoutLogs.length && history.length < n; i++) {
+    var log = ST.workoutLogs[i];
+    var ex = (log.exercises||[]).find(function(e){ return e.id===exId || e.name===exName; });
+    if(ex) {
+      var doneSets = (ex.sets||[]).filter(function(s){ return s.weight||s.reps; });
+      if(doneSets.length > 0) {
+        var maxW = Math.max.apply(null, doneSets.map(function(s){ return parseFloat(s.weight)||0; }));
+        var maxSet = doneSets.find(function(s){ return parseFloat(s.weight)===maxW; }) || doneSets[0];
+        history.push({ date: log.date, maxWeight: maxW, maxReps: parseFloat(maxSet.reps)||0, totalSets: doneSets.length, allSets: doneSets });
+      }
+    }
+  }
+  return history; // most recent first
+}
+
+function getLastExSession(exId, exName) {
+  var h = getExHistory(exId, exName, 1);
+  return h.length > 0 ? h[0] : null;
+}
+
+function getProgressionIncrement(exId, trainingWeeks) {
+  // Exercise-specific increments based on muscle size and movement type
+  const increments = {
+    // Big compound lower — largest muscles, fastest progression
+    back_squat:   {inc:10, slowInc:5},
+    hip_thrust:   {inc:10, slowInc:5},
+    rdl_mon:      {inc:5,  slowInc:5},
+    rdl_thu:      {inc:5,  slowInc:5},
+    rdl_sat:      {inc:5,  slowInc:5},
+    leg_press:    {inc:10, slowInc:5},
+    lunge:        {inc:5,  slowInc:2.5},
+    bulgarian:    {inc:5,  slowInc:2.5},
+    goblet:       {inc:5,  slowInc:2.5},
+    db_rdl:       {inc:5,  slowInc:2.5},
+    sl_rdl:       {inc:5,  slowInc:2.5},
+    // Big compound upper
+    bench:        {inc:5,  slowInc:2.5},
+    ohp:          {inc:5,  slowInc:2.5},
+    bb_row:       {inc:5,  slowInc:2.5},
+    pullup:       {inc:1,  slowInc:1,  unit:"rep"}, // bodyweight — add reps
+    cable_row:    {inc:5,  slowInc:2.5},
+    lat_pull:     {inc:5,  slowInc:2.5},
+    db_row:       {inc:5,  slowInc:2.5},
+    chest_row:    {inc:5,  slowInc:2.5},
+    incline_db:   {inc:5,  slowInc:2.5},
+    // Isolation — small muscles, progress slowly
+    ez_curl:      {inc:2.5, slowInc:2.5},
+    hammer:       {inc:2.5, slowInc:2.5},
+    incline_curl: {inc:2.5, slowInc:2.5},
+    tri_push:     {inc:2.5, slowInc:2.5},
+    oh_tri:       {inc:2.5, slowInc:2.5},
+    ez_super:     {inc:2.5, slowInc:2.5},
+    cable_super:  {inc:2.5, slowInc:2.5},
+    lat_raise:    {inc:2.5, slowInc:2.5},
+    lat_fin:      {inc:2.5, slowInc:2.5},
+    face_pull_t:  {inc:2.5, slowInc:2.5},
+    face_pull_f:  {inc:2.5, slowInc:2.5},
+    cable_fly:    {inc:2.5, slowInc:2.5},
+    cable_crunch: {inc:5,   slowInc:2.5},
+    cable_through:{inc:5,   slowInc:5},
+    pull_thru:    {inc:5,   slowInc:5},
+    // Calves — high rep, slower upper progress
+    stand_calf:   {inc:5,  slowInc:5},
+    seat_calf:    {inc:5,  slowInc:5},
+    // Isolation legs
+    leg_ext:      {inc:5,  slowInc:5},
+    leg_curl:     {inc:5,  slowInc:5},
+    // Core/cardio — reps/time based, no weight increment
+    plank_m:      {inc:0},
+    dead_bug:     {inc:0},
+    bike:         {inc:0},
+    hang_knee:    {inc:1, slowInc:1, unit:"rep"},
+    ab_wheel:     {inc:1, slowInc:1, unit:"rep"},
+    rev_crunch:   {inc:1, slowInc:1, unit:"rep"},
+    woodchop:     {inc:2.5, slowInc:2.5},
+    side_plank:   {inc:0},
+    hip_flex:     {inc:0},
+    foam_roll:    {inc:0},
+    pushup:       {inc:1, slowInc:1, unit:"rep"},
+  };
+
+  var cfg = increments[exId] || {inc:5, slowInc:2.5};
+  if(cfg.inc === 0) return {amount:0, unit:"—"};
+
+  // Slow down progression after initial phase
+  // Weeks 1-4: full increment, Weeks 5-12: full, Weeks 13+: half increment
+  var amount = trainingWeeks >= 13 ? cfg.slowInc : cfg.inc;
+  return {amount, unit: cfg.unit || "lbs"};
+}
+
+function getSuggestedWeight(last, exId, exName) {
+  if(!last || last.maxWeight <= 0) return null;
+  var history = getExHistory(exId, exName, 6);
+  if(history.length < 2) {
+    var trainingWeeks = ST.workoutLogs.length > 0 ? Math.ceil((daysAgo(ST.workoutLogs[ST.workoutLogs.length-1].date)+1)/7) : 1;
+    var prog = getProgressionIncrement(exId, trainingWeeks);
+    if(prog.unit === "rep" || prog.amount === 0) return last.maxWeight;
+    return last.totalSets >= 3 ? last.maxWeight + prog.amount : last.maxWeight;
+  }
+
+  // Training age in weeks
+  var firstLog = ST.workoutLogs.length > 0 ? ST.workoutLogs[ST.workoutLogs.length-1].date : last.date;
+  var trainingWeeks = Math.ceil((daysAgo(firstLog)+1)/7);
+  var prog = getProgressionIncrement(exId, trainingWeeks);
+  if(prog.amount === 0) return null;
+
+  // Check for stall: same weight for 3+ sessions in a row
+  var recentWeights = history.slice(0,3).map(function(h){ return h.maxWeight; });
+  var isStalled = recentWeights.length >= 3 && recentWeights.every(function(w){ return w===recentWeights[0]; });
+
+  var daysSinceLast = daysAgo(last.date);
+  var longBreak = daysSinceLast > 10;
+  var lastIncomplete = last.totalSets < 3;
+  var repTrend = history.slice(0,3).map(function(h){ return h.maxReps; });
+  var repsDropping = repTrend.length >= 3 && repTrend[0] < repTrend[1] && repTrend[1] < repTrend[2];
+
+  if(isStalled && !longBreak) return Math.round(last.maxWeight * 0.9 / 2.5) * 2.5;
+  if(longBreak) return Math.round(last.maxWeight * 0.9 / 2.5) * 2.5;
+  if(lastIncomplete) return last.maxWeight;
+  if(repsDropping) return last.maxWeight;
+
+  return last.maxWeight + prog.amount;
+}
+
+function getProgressionNote(last, exId, exName) {
+  if(!last || last.maxWeight <= 0) return null;
+  var history = getExHistory(exId, exName, 6);
+  if(history.length < 2) return null;
+
+  var firstLog = ST.workoutLogs.length > 0 ? ST.workoutLogs[ST.workoutLogs.length-1].date : last.date;
+  var trainingWeeks = Math.ceil((daysAgo(firstLog)+1)/7);
+  var prog = getProgressionIncrement(exId, trainingWeeks);
+
+  var recentWeights = history.slice(0,3).map(function(h){ return h.maxWeight; });
+  var isStalled = recentWeights.length >= 3 && recentWeights.every(function(w){ return w===recentWeights[0]; });
+  var daysSinceLast = daysAgo(last.date);
+  var longBreak = daysSinceLast > 10;
+  var lastIncomplete = last.totalSets < 3;
+  var repTrend = history.slice(0,3).map(function(h){ return h.maxReps; });
+  var repsDropping = repTrend.length >= 3 && repTrend[0] < repTrend[1] && repTrend[1] < repTrend[2];
+
+  if(prog.amount === 0) return {text:"Track reps/time — no weight needed", color:"var(--muted)"};
+  if(isStalled && !longBreak) return {text:"Stalled 3x — deload 10% and rebuild", color:"var(--orange)"};
+  if(longBreak) return {text:`Back after ${daysSinceLast}d — ease in at 90%`, color:"var(--yellow)"};
+  if(lastIncomplete) return {text:"Incomplete last session — hold weight", color:"var(--yellow)"};
+  if(repsDropping) return {text:"Reps declining — hold weight, focus form", color:"var(--yellow)"};
+
+  var phaseNote = trainingWeeks >= 13 ? " (slower phase)" : trainingWeeks >= 5 ? "" : " (newbie gains!)";
+  return {text:`Add ${prog.amount}${prog.unit}${phaseNote}`, color:"var(--green)"};
+}
+
+function getExPriority(exId) {
+  var mustDo = ["back_squat","bench","ohp","pullup","hip_thrust","bb_row","rdl_mon","rdl_thu","rdl_sat"];
+  var optional = ["stand_calf","seat_calf","oh_tri","incline_curl","hammer","lat_fin","cable_super","ez_super","plank_m","dead_bug","foam_roll","hip_flex"];
+  if(mustDo.includes(exId)) return "must";
+  if(optional.includes(exId)) return "optional";
+  return "important";
+}
+
 function getPRs() {
   var p = {};
   ST.workoutLogs.forEach(function(log){
@@ -826,8 +1019,10 @@ function fmtReport(t) {
 // RENDER ENGINE
 // ══════════════════════════════════════════════════
 function render() {
+  // Destroy existing charts before rebuilding DOM
+  Object.values(ST.charts).forEach(c=>{try{c.destroy();}catch{}});
   ST.charts = {};
-  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}`;
+  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}${ST.editingLog?renderEditLogModal():""}`;
   attachAll();
   renderCharts();
 }
@@ -886,7 +1081,7 @@ function updateMacroPreview() {
 // NAV + TIMER
 // ══════════════════════════════════════════════════
 function renderNav() {
-  const tabs = [{id:"dashboard",icon:"⚡",label:"Home"},{id:"workout",icon:"🏋️",label:"Workout"},{id:"nutrition",icon:"🥗",label:"Food"},{id:"body",icon:"📊",label:"Body"},{id:"coach",icon:"🤖",label:"Coach"},{id:"history",icon:"📅",label:"Log"}];
+  const tabs = [{id:"dashboard",icon:"⚡",label:"Home"},{id:"workout",icon:"🏋️",label:"Workout"},{id:"history",icon:"📅",label:"Log"},{id:"nutrition",icon:"🥗",label:"Food"},{id:"body",icon:"📊",label:"Body"},{id:"coach",icon:"🤖",label:"Coach"}];
   return `<nav class="bnav">${tabs.map(t=>`<button class="nb${ST.tab===t.id?" active":""}" data-nav="${t.id}"><span class="ni">${t.icon}</span><span class="nl">${t.label}</span></button>`).join("")}</nav>`;
 }
 function renderTimer() {
@@ -915,37 +1110,135 @@ function macroRows(sum) {
   return [{label:"Calories",val:sum.cal,target:TARGETS.cal,color:"#f97316",unit:"kcal"},{label:"Protein",val:ri(sum.p),target:TARGETS.p,color:"#22c55e",unit:"g"},{label:"Carbs",val:ri(sum.c),target:TARGETS.c,color:"#4f8ef7",unit:"g"},{label:"Fat",val:ri(sum.f),target:TARGETS.f,color:"#eab308",unit:"g"}]
     .map(m=>`<div class="pb-row"><div class="pb-label"><span class="pb-name">${m.label}</span><span class="pb-val">${m.val}${m.unit} / ${m.target}${m.unit}</span></div><div class="pb-wrap"><div class="pb-fill" style="width:${Math.min(100,(m.val/m.target)*100).toFixed(1)}%;background:${m.color}"></div></div></div>`).join("");
 }
+function buildSleepCardInner(sleep) {
+  sleep = sleep || 0;
+  const color = sleep>=7?"var(--green)":sleep>=6?"var(--yellow)":sleep>0?"var(--red)":"var(--muted)";
+  const fmt = sleep>0 ? (Number.isInteger(sleep*4) && sleep%1!==0 ? sleep+"h" : sleep+"h") : "—";
+  // Format nicely: 7.25 → "7h 15m"
+  const h = Math.floor(sleep);
+  const m = Math.round((sleep - h)*60);
+  const display = sleep>0 ? (m>0 ? `${h}h ${m}m` : `${h}h`) : "—";
+  return `
+    <div class="sl">Sleep Last Night</div>
+    <div style="font-family:var(--font-d);font-size:32px;line-height:1;color:${color}">${display}</div>
+    <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">Goal: 7–8h</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px">
+      <button class="btn ${sleep===5?"bp":"bg"}" style="padding:6px;font-size:12px;font-weight:700" data-sleep-set="5">5h</button>
+      <button class="btn ${sleep===6?"bp":"bg"}" style="padding:6px;font-size:12px;font-weight:700" data-sleep-set="6">6h</button>
+      <button class="btn ${sleep>=7&&sleep<8?"bp":"bg"}" style="padding:6px;font-size:12px;font-weight:700" data-sleep-set="7">7h</button>
+      <button class="btn ${sleep>=8?"bp":"bg"}" style="padding:6px;font-size:12px;font-weight:700" data-sleep-set="8">8h</button>
+    </div>
+    <div style="display:flex;gap:5px">
+      <button class="btn bg" style="flex:1;padding:5px;font-size:11px;font-weight:700" data-sleep-set="${Math.max(0,sleep-0.25)}">-15m</button>
+      <button class="btn bp" style="flex:1;padding:5px;font-size:11px;font-weight:700" data-sleep-set="${sleep+0.25}">+15m</button>
+    </div>`;
+}
+
+function buildStepsCardInner(steps) {
+  steps = steps || 0;
+  const color = steps>=10000?"var(--green)":steps>=7500?"var(--yellow)":steps>0?"var(--orange)":"var(--muted)";
+  return `
+    <div class="sl">Steps Today</div>
+    <div style="font-family:var(--font-d);font-size:28px;line-height:1;color:${color}">${steps>0?steps.toLocaleString():"—"}</div>
+    <div style="font-size:11px;color:var(--muted);margin:4px 0 8px">Goal: 10,000</div>
+    <div style="display:flex;gap:5px">
+      <button class="btn bg" style="flex:1;padding:6px;font-size:11px;font-weight:700" data-steps="-250">-250</button>
+      <button class="btn bp" style="flex:1;padding:6px;font-size:11px;font-weight:700" data-steps="250">+250</button>
+      <button class="btn bp" style="flex:1;padding:6px;font-size:11px;font-weight:700" data-steps="500">+500</button>
+    </div>`;
+}
+
+function attachSleepSteps() {
+  document.querySelectorAll("[data-sleep-set]").forEach(function(el) {
+    el.addEventListener("click", function() {
+      var dl = getDailyLog(today()) || {id:today(),date:today(),steps:0,sleep_hours:0};
+      dl.sleep_hours = Math.round(parseFloat(el.dataset.sleepSet)*4)/4;
+      upsertDailyLog(today(), {sleep_hours:dl.sleep_hours, steps:dl.steps||0});
+      var card = document.getElementById("sleep-card");
+      if(card) { card.innerHTML = buildSleepCardInner(dl.sleep_hours); attachSleepSteps(); }
+    });
+  });
+  document.querySelectorAll("[data-steps]").forEach(function(el) {
+    el.addEventListener("click", function() {
+      var dl = getDailyLog(today()) || {id:today(),date:today(),steps:0,sleep_hours:0};
+      dl.steps = Math.max(0, (dl.steps||0) + parseInt(el.dataset.steps));
+      upsertDailyLog(today(), {steps:dl.steps, sleep_hours:dl.sleep_hours||0});
+      var card = document.getElementById("steps-card");
+      if(card) { card.innerHTML = buildStepsCardInner(dl.steps); attachSleepSteps(); }
+    });
+  });
+}
+
 function renderDashboard() {
   const latest=ST.bodyStats[0]||{}, prev=ST.bodyStats[1]||{};
   const wl=weekLogs(), sum=nutSum(nutByDate(today()));
+  const water=todayWater(), filledDrops=Math.round((water/TARGETS.water)*8);
   const wDelta=latest.weight&&prev.weight?(latest.weight-prev.weight).toFixed(1):null;
+  const todayLog=getDailyLog(today())||{};
+  const sleep=todayLog.sleep_hours||0;
+  const steps=todayLog.steps||0;
+
+  // AI Coach reminder
+  const lastReport=ST.aiReports[0];
+  const daysUntilEval=lastReport?Math.max(0,14-daysAgo(lastReport.date)):0;
+  const evalReady=!lastReport||daysAgo(lastReport.date)>=14;
+
   return `
   <div class="ph"><div class="pt">DIEGO'S TRACKER</div><div class="ps">${(()=>{
     const firstLog = ST.workoutLogs.length > 0 ? ST.workoutLogs[ST.workoutLogs.length-1].date : null;
     const weekLabel = firstLog ? "Training week " + Math.ceil((daysAgo(firstLog)+1)/7) : new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"});
     return weekLabel;
   })()} · ${wl.length}/6 sessions · <span style="color:${ST.online?'var(--green)':'var(--orange)'}">${ST.online?'● Synced':'● Offline — reopen to sync'}</span></div></div>
+
   <div class="wbanner"><div class="wname">LET'S GO,<br>DIEGO.</div><div class="wsub">${latest.weight?`${latest.weight} lbs · ${latest.bf}% BF · ${getLean(latest.weight,latest.bf)||"—"} lbs lean mass`:"Tap Body tab to log your first entry"}</div></div>
+
   <div class="sgrid">
     <div class="sc"><div class="sl">Weight</div><div class="sv" style="color:#4f8ef7">${latest.weight||"—"}</div><div class="su">lbs</div>${wDelta!==null?`<div class="sd ${parseFloat(wDelta)<=0?"dg":"db"}">${parseFloat(wDelta)>0?"+":""}${wDelta} lbs</div>`:""}</div>
     <div class="sc"><div class="sl">Body Fat</div><div class="sv" style="color:#ef4444">${latest.bf||"—"}</div><div class="su">%</div></div>
     <div class="sc"><div class="sl">Protein Today</div><div class="sv" style="color:#22c55e">${ri(sum.p)||"—"}</div><div class="su">/ ${TARGETS.p}g</div></div>
     <div class="sc"><div class="sl">Calories Today</div><div class="sv" style="color:#f97316">${sum.cal||"—"}</div><div class="su">/ ${TARGETS.cal}</div></div>
   </div>
-  <div class="card">
-    <div class="ct">This Week</div>
-    <div class="wrings">${DAY_ORDER.map(d=>{const done=wl.some(l=>l.dayId===d),plan=PLAN[d],isToday=getToday()===d,r=16,circ=2*Math.PI*r;return`<div class="rwrap"><svg class="rsvg" viewBox="0 0 40 40"><circle class="rbg" cx="20" cy="20" r="${r}"/><circle class="rprog" cx="20" cy="20" r="${r}" stroke="${plan.color}" stroke-dasharray="${circ}" stroke-dashoffset="${done?0:circ}"/><text class="rday" x="20" y="20" fill="${isToday?plan.color:done?"#22c55e":"#6b6b88"}">${d[0]}</text></svg><div class="rlabel" style="color:${isToday?plan.color:"inherit"}">${d}</div></div>`;}).join("")}</div>
-  </div>
+
   <div class="card"><div class="ct">Today's Macros</div>${macroRows(sum)}</div>
-  <div class="card">
-    <div class="ct">Quick Start</div>
-    ${DAY_ORDER.map(d=>{const plan=PLAN[d],last=ST.workoutLogs.find(l=>l.dayId===d),isToday=getToday()===d;return`<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer" data-start-day="${d}"><div style="width:36px;height:36px;border-radius:10px;background:${plan.color}22;border:1px solid ${plan.color}44;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${plan.emoji}</div><div style="flex:1"><div style="font-weight:600;font-size:13px;${isToday?`color:${plan.color}`:""}">${plan.label} — ${plan.title}</div><div style="font-size:11px;color:var(--muted);margin-top:2px">${plan.duration} · ${last?`Last: ${fmtDate(last.date)}`:"Never done"}</div></div><div style="color:var(--muted);font-size:20px">›</div></div>`;}).join("")}
+
+  <div class="card" id="water-card">
+    <div class="ct">Water — ${water.toFixed(1)}L / ${TARGETS.water}L</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <button class="btn bg" style="padding:8px 12px;font-size:13px" data-water="-0.25">-¼L</button>
+      <button class="btn bp" style="flex:1;padding:8px;font-size:13px" data-water="0.25">+¼L</button>
+      <button class="btn bp" style="flex:1;padding:8px;font-size:13px" data-water="0.5">+½L</button>
+    </div>
+    <div class="pb-wrap" style="margin-bottom:10px"><div class="pb-fill" style="width:${Math.min(100,(water/TARGETS.water)*100).toFixed(1)}%;background:#06b6d4"></div></div>
+    <div class="water-track">${Array.from({length:8},(_,i)=>`<div class="water-drop${i<filledDrops?" filled":""}">💧</div>`).join("")}</div>
   </div>
+
+  <!-- Sleep & Steps -->
+  <div class="sgrid">
+    <div class="sc" id="sleep-card">${buildSleepCardInner(sleep)}</div>
+    <div class="sc" id="steps-card">${buildStepsCardInner(steps)}</div>
+  </div>
+
+  ${evalReady?`
+  <div style="margin:0 16px 12px;background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.4);border-radius:var(--r);padding:16px;display:flex;align-items:center;gap:12px">
+    <div style="font-size:28px">🤖</div>
+    <div style="flex:1">
+      <div style="font-weight:700;font-size:14px;color:var(--purple)">AI Coach evaluation ready!</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:3px">${lastReport?`Last eval ${daysAgo(lastReport.date)} days ago`:"No evaluations yet — get your first one"}</div>
+    </div>
+    <button class="btn bpur" style="padding:10px 14px;font-size:13px;white-space:nowrap" data-nav="coach">Run Now →</button>
+  </div>`:`
+  <div style="margin:0 16px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px;display:flex;align-items:center;gap:12px">
+    <div style="font-size:22px">🤖</div>
+    <div style="flex:1">
+      <div style="font-weight:600;font-size:13px">Next AI Coach eval in <strong style="color:var(--purple)">${daysUntilEval} days</strong></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">Last: ${lastReport?fmtDate(lastReport.date):"never"}</div>
+    </div>
+  </div>`}
+
   ${(()=>{
     const h = new Date().getHours();
     const m = new Date().getMinutes();
     const mins = h * 60 + m;
-    // Show reminder from 7pm (19:00) onwards
     if(mins < 19*60) return "";
     const isAfter8  = mins >= 20*60;
     const isAfter10 = mins >= 22*60;
@@ -972,6 +1265,97 @@ function renderDashboard() {
       </div>
     </div>`;
   })()}
+
+  <div class="card">
+    <div class="ct">💾 Backup & Restore</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">Export your data as a JSON file. Any future version of this app will import it and keep all your progress.</div>
+    <div style="display:flex;gap:10px">
+      <button class="btn bs" style="flex:1;font-size:13px" data-action="export">⬇ Export</button>
+      <label class="btn bg" style="flex:1;font-size:13px;cursor:pointer">⬆ Import<input type="file" accept=".json" id="import-file" style="display:none"></label>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--muted)">${ST.workoutLogs.length} workouts · ${ST.bodyStats.length} body entries · ${ST.nutritionLogs.filter(l=>l.type==="food").length} food logs</div>
+  </div>`;
+
+  return `
+  <div class="ph"><div class="pt">DIEGO'S TRACKER</div><div class="ps">${(()=>{
+    const firstLog = ST.workoutLogs.length > 0 ? ST.workoutLogs[ST.workoutLogs.length-1].date : null;
+    const weekLabel = firstLog ? "Training week " + Math.ceil((daysAgo(firstLog)+1)/7) : new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"});
+    return weekLabel;
+  })()} · ${wl.length}/6 sessions · <span style="color:${ST.online?'var(--green)':'var(--orange)'}">${ST.online?'● Synced':'● Offline — reopen to sync'}</span></div></div>
+
+  <div class="wbanner"><div class="wname">LET'S GO,<br>DIEGO.</div><div class="wsub">${latest.weight?`${latest.weight} lbs · ${latest.bf}% BF · ${getLean(latest.weight,latest.bf)||"—"} lbs lean mass`:"Tap Body tab to log your first entry"}</div></div>
+
+  <div class="sgrid">
+    <div class="sc"><div class="sl">Weight</div><div class="sv" style="color:#4f8ef7">${latest.weight||"—"}</div><div class="su">lbs</div>${wDelta!==null?`<div class="sd ${parseFloat(wDelta)<=0?"dg":"db"}">${parseFloat(wDelta)>0?"+":""}${wDelta} lbs</div>`:""}</div>
+    <div class="sc"><div class="sl">Body Fat</div><div class="sv" style="color:#ef4444">${latest.bf||"—"}</div><div class="su">%</div></div>
+    <div class="sc"><div class="sl">Protein Today</div><div class="sv" style="color:#22c55e">${ri(sum.p)||"—"}</div><div class="su">/ ${TARGETS.p}g</div></div>
+    <div class="sc"><div class="sl">Calories Today</div><div class="sv" style="color:#f97316">${sum.cal||"—"}</div><div class="su">/ ${TARGETS.cal}</div></div>
+  </div>
+
+  <div class="card">
+    <div class="ct">Today's Macros</div>
+    ${macroRows(sum)}
+  </div>
+
+  <div class="card" id="water-card">
+    <div class="ct">Water — ${water.toFixed(1)}L / ${TARGETS.water}L</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <button class="btn bg" style="padding:8px 12px;font-size:13px" data-water="-0.25">-¼L</button>
+      <button class="btn bp" style="flex:1;padding:8px;font-size:13px" data-water="0.25">+¼L</button>
+      <button class="btn bp" style="flex:1;padding:8px;font-size:13px" data-water="0.5">+½L</button>
+    </div>
+    <div class="pb-wrap" style="margin-bottom:10px"><div class="pb-fill" style="width:${Math.min(100,(water/TARGETS.water)*100).toFixed(1)}%;background:#06b6d4"></div></div>
+    <div class="water-track">${Array.from({length:8},(_,i)=>`<div class="water-drop${i<filledDrops?" filled":""}">💧</div>`).join("")}</div>
+  </div>
+
+  ${evalReady?`
+  <div style="margin:0 16px 12px;background:rgba(168,85,247,.1);border:1px solid rgba(168,85,247,.4);border-radius:var(--r);padding:16px;display:flex;align-items:center;gap:12px">
+    <div style="font-size:28px">🤖</div>
+    <div style="flex:1">
+      <div style="font-weight:700;font-size:14px;color:var(--purple)">AI Coach evaluation ready!</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:3px">${lastReport?`Last eval ${daysAgo(lastReport.date)} days ago`:"No evaluations yet — get your first one"}</div>
+    </div>
+    <button class="btn bpur" style="padding:10px 14px;font-size:13px;white-space:nowrap" data-nav="coach">Run Now →</button>
+  </div>`:`
+  <div style="margin:0 16px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:14px;display:flex;align-items:center;gap:12px">
+    <div style="font-size:22px">🤖</div>
+    <div style="flex:1">
+      <div style="font-weight:600;font-size:13px">Next AI Coach eval in <strong style="color:var(--purple)">${daysUntilEval} days</strong></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">Last: ${lastReport?fmtDate(lastReport.date):"never"}</div>
+    </div>
+  </div>`}
+
+  ${(()=>{
+    const h = new Date().getHours();
+    const m = new Date().getMinutes();
+    const mins = h * 60 + m;
+    if(mins < 19*60) return "";
+    const isAfter8  = mins >= 20*60;
+    const isAfter10 = mins >= 22*60;
+    const color  = isAfter10 ? "var(--red)" : isAfter8 ? "var(--orange)" : "var(--yellow)";
+    const border = isAfter10 ? "rgba(239,68,68,.3)" : isAfter8 ? "rgba(249,115,22,.3)" : "rgba(234,179,8,.3)";
+    const bg     = isAfter10 ? "rgba(239,68,68,.08)" : isAfter8 ? "rgba(249,115,22,.08)" : "rgba(234,179,8,.08)";
+    const icon   = isAfter10 ? "😴" : isAfter8 ? "🚫" : "⏰";
+    const title  = isAfter10 ? "Bed time!" : isAfter8 ? "Kitchen is closed" : "Last call — 8pm in " + (20*60 - mins) + " min";
+    const msg    = isAfter10
+      ? "You should be asleep. 5am comes fast. Gym performance drops significantly with less than 7 hours."
+      : isAfter8
+      ? "No more eating tonight. Sleep in 2 hours — food now hurts sleep quality and recovery."
+      : "Finish any remaining meals before 8pm. Eat slow-digesting protein (Greek yogurt, cottage cheese) if still hungry.";
+    return `<div style="margin:0 16px 12px;background:${bg};border:1px solid ${border};border-radius:var(--r);padding:16px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="font-size:24px">${icon}</div>
+        <div style="font-weight:700;font-size:14px;color:${color}">${title}</div>
+      </div>
+      <div style="font-size:12px;color:var(--muted2);line-height:1.6">${msg}</div>
+      <div style="margin-top:10px;display:flex;gap:16px;font-size:11px;color:var(--muted)">
+        <span>🍽️ Stop eating: <strong style="color:${color}">8:00 PM</strong></span>
+        <span>😴 Bed by: <strong style="color:${color}">10:00 PM</strong></span>
+        <span>⏰ Wake up: <strong style="color:var(--accent)">4:30 AM</strong></span>
+      </div>
+    </div>`;
+  })()}
+
   <div class="card">
     <div class="ct">💾 Backup & Restore</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">Export your data as a JSON file. Any future version of this app will import it and keep all your progress.</div>
@@ -1017,17 +1401,39 @@ function renderExBlock(ex, idx) {
   const sets=ST.activeSets[ex.id]||[], open=ST.openEx[ex.id], guideOpen=ST.openGuide[ex.id];
   const doneCount=sets.filter(s=>s.done).length, allDone=doneCount===sets.length&&sets.length>0;
   const planColor=PLAN[ST.activeDay].color;
+  const priority=getExPriority(ex.id);
+  const last=getLastExSession(ex.id, ex.name);
+  const suggested=getSuggestedWeight(last, ex.id, ex.name);
+  const progNote=getProgressionNote(last, ex.id, ex.name);
+  const priorityStyle={
+    must:     {bg:"rgba(239,68,68,.15)",  color:"var(--red)",    label:"🔴 Must Do"},
+    important:{bg:"rgba(234,179,8,.15)",  color:"var(--yellow)", label:"🟡 Important"},
+    optional: {bg:"rgba(107,107,136,.15)",color:"var(--muted)",  label:"⚪ Optional"},
+  }[priority];
+
   return `
   <div class="exb" style="${allDone?`border-color:${planColor}55`:""}" id="ex-${ex.id}">
     <div class="exh" data-toggle-ex="${ex.id}">
       <div class="exnum${allDone?" done":""}">${allDone?"✓":(idx+1)}</div>
-      <div class="exinfo"><div class="exname">${ex.name}</div><div class="exspec">${ex.sets}×${ex.reps} · ${ex.tempo} · Rest ${ex.rest}${doneCount>0?` · <span style="color:var(--green)">${doneCount}/${sets.length} ✓</span>`:""}</div></div>
+      <div class="exinfo">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <div class="exname">${ex.name}</div>
+          <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;background:${priorityStyle.bg};color:${priorityStyle.color}">${priorityStyle.label}</span>
+        </div>
+        <div class="exspec">${ex.sets}×${ex.reps} · ${ex.tempo} · Rest ${ex.rest}${doneCount>0?` · <span style="color:var(--green)">${doneCount}/${sets.length} ✓</span>`:""}</div>
+        <div style="font-size:11px;font-weight:700;color:var(--muted2);margin-top:3px">🎯 ${ex.muscles}</div>
+        ${last?`<div style="font-size:11px;color:var(--muted);margin-top:2px">
+          Last: <strong style="color:var(--text)">${last.maxWeight}lbs × ${last.maxReps} reps</strong> (${fmtDate(last.date)})
+          ${suggested?` · <strong style="color:${planColor}">Target: ${suggested}lbs</strong>`:""}
+        </div>
+        ${progNote?`<div style="font-size:11px;font-weight:600;color:${progNote.color};margin-top:2px">→ ${progNote.text}</div>`:""}
+        `:`<div style="font-size:11px;color:var(--muted);margin-top:2px">No previous data — establish your baseline today</div>`}
+      </div>
       <div class="exarr${open?" open":""}">⌄</div>
     </div>
     ${open?`
-    <div style="display:flex;gap:8px;padding:0 14px 10px">
-      <button class="btn bg" style="flex:1;font-size:12px;padding:8px" data-toggle-guide="${ex.id}">${guideOpen?"Hide":"📋 Form Guide"}</button>
-      <a href="https://www.youtube.com/results?search_query=${encodeURIComponent(ex.ytQ)}" target="_blank" class="btn bd" style="flex:1;font-size:12px;padding:8px;text-decoration:none">▶ YouTube</a>
+    <div style="padding:0 14px 10px">
+      <button class="btn bg" style="width:100%;font-size:12px;padding:8px" data-toggle-guide="${ex.id}">${guideOpen?"Hide Form Guide":"📋 Form Guide"}</button>
     </div>
     ${guideOpen?`<div class="fguide"><div class="fg-body">
       <div class="fg-sec"><div class="fg-ttl">Step-by-Step</div>${(ex.steps||[]).map((s,i)=>`<div class="fg-step"><div class="fg-snum">${i+1}</div><div>${s}</div></div>`).join("")}</div>
@@ -1036,7 +1442,7 @@ function renderExBlock(ex, idx) {
     </div></div>`:""}
     <div class="sets-area">
       <div class="sets-hdr"><div>SET</div><div>WEIGHT (lbs)</div><div>REPS</div><div>✓</div></div>
-      ${sets.map((set,si)=>`<div class="set-row"><div class="snum${set.done?" done":""}">${si+1}</div><input class="sinput" type="number" inputmode="decimal" placeholder="lbs" value="${set.weight}" data-sw="${ex.id}" data-si="${si}"><input class="sinput" type="number" inputmode="numeric" placeholder="${ex.reps}" value="${set.reps}" data-sr="${ex.id}" data-si="${si}"><div class="schk${set.done?" done":""}" data-cs2="${ex.id}" data-si="${si}">${set.done?"✓":"○"}</div></div>`).join("")}
+      ${sets.map((set,si)=>`<div class="set-row"><div class="snum${set.done?" done":""}">${si+1}</div><input class="sinput" type="number" inputmode="decimal" placeholder="${suggested||"lbs"}" value="${set.weight}" data-sw="${ex.id}" data-si="${si}"><input class="sinput" type="number" inputmode="numeric" placeholder="${ex.reps}" value="${set.reps}" data-sr="${ex.id}" data-si="${si}"><div class="schk${set.done?" done":""}" data-cs2="${ex.id}" data-si="${si}">${set.done?"✓":"○"}</div></div>`).join("")}
       <button class="add-set" data-add-set="${ex.id}">+ Add Set</button>
     </div>`:""}
   </div>`;
@@ -1171,19 +1577,104 @@ function renderNutToday(sum, entries, water, filled) {
   </div>`;
 }
 function renderNutWeek() {
-  const days7=[];
-  for(let i=6;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const ds=d.toISOString().split("T")[0];const s=nutSum(nutByDate(ds));days7.push({label:new Date(ds+"T12:00:00").toLocaleDateString("en-US",{weekday:"short"}),cal:s.cal||null,p:s.p||null});}
-  const dn=days7.filter(d=>d.cal);
-  const avgCal=dn.length?Math.round(dn.reduce((a,d)=>a+d.cal,0)/dn.length):0;
-  const avgP=dn.length?Math.round(dn.reduce((a,d)=>a+(d.p||0),0)/dn.length):0;
+  // Build 7 days data
+  const days7 = [];
+  for(let i=6;i>=0;i--) {
+    const d=new Date(); d.setDate(d.getDate()-i);
+    const ds=d.toISOString().split("T")[0];
+    const s=nutSum(nutByDate(ds));
+    const entries=nutByDate(ds);
+    days7.push({
+      date:ds,
+      label:new Date(ds+"T12:00:00").toLocaleDateString("en-US",{weekday:"short"}),
+      dayNum:new Date(ds+"T12:00:00").getDate(),
+      cal:s.cal||0, p:ri(s.p)||0, c:ri(s.c)||0, f:ri(s.f)||0,
+      logged:entries.length>0,
+      entries
+    });
+  }
+
+  const selectedDay = ST.weekDay || today();
+  const selData = days7.find(d=>d.date===selectedDay) || days7[days7.length-1];
+  const selEntries = nutByDate(selectedDay);
+  const selSum = nutSum(selEntries);
+  const selWater = ST.nutritionLogs.find(l=>l.date===selectedDay&&l.type==="water");
+
+  // 7-day totals vs goals
+  const loggedDays = days7.filter(d=>d.logged);
+  const totals = days7.reduce((a,d)=>({cal:a.cal+d.cal, p:a.p+d.p, c:a.c+d.c, f:a.f+d.f}),{cal:0,p:0,c:0,f:0});
+  const weekGoal = {cal:TARGETS.cal*7, p:TARGETS.p*7, c:TARGETS.c*7, f:TARGETS.f*7};
+
   return `
-  <div class="sgrid">
-    <div class="sc"><div class="sl">Avg Calories</div><div class="sv" style="color:#f97316;font-size:22px">${avgCal||"—"}</div><div class="su">kcal/day</div></div>
-    <div class="sc"><div class="sl">Avg Protein</div><div class="sv" style="color:#22c55e;font-size:22px">${avgP||"—"}</div><div class="su">g/day</div></div>
+  <!-- 7-day summary bars -->
+  <div class="card" style="margin-top:4px">
+    <div class="ct">7-Day Progress vs Goal</div>
+    ${[
+      {label:"Calories", val:totals.cal, goal:weekGoal.cal, color:"#f97316", unit:"kcal"},
+      {label:"Protein",  val:totals.p,   goal:weekGoal.p,   color:"#22c55e", unit:"g"},
+      {label:"Carbs",    val:totals.c,   goal:weekGoal.c,   color:"#4f8ef7", unit:"g"},
+      {label:"Fat",      val:totals.f,   goal:weekGoal.f,   color:"#eab308", unit:"g"},
+    ].map(m=>{
+      const pct=Math.min(100,(m.val/m.goal)*100).toFixed(1);
+      const over=m.val>m.goal;
+      return `<div class="pb-row">
+        <div class="pb-label">
+          <span class="pb-name">${m.label}</span>
+          <span class="pb-val" style="color:${over?"var(--red)":"var(--muted)"}">${m.val}${m.unit} / ${m.goal}${m.unit}</span>
+        </div>
+        <div class="pb-wrap"><div class="pb-fill" style="width:${pct}%;background:${over?"var(--red)":m.color}"></div></div>
+      </div>`;
+    }).join("")}
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">${loggedDays.length}/7 days logged · ${7-loggedDays.length} days missing</div>
   </div>
-  <div class="card"><div class="ct">Calorie Trend (7 days)</div></div>
-  <div class="card"><div class="ct">Protein Trend (7 days)</div></div>
-  <div class="card"><div class="ct">Protein Streak — hit ${TARGETS.p}g (14 days)</div><div class="streak-row">${proteinStreak().map(d=>`<div class="streak-day${d.hit?" hit":d.logged?" miss":""}">${d.label}</div>`).join("")}</div></div>`;
+
+  <!-- Day picker -->
+  <div style="display:flex;gap:6px;padding:0 16px 12px;overflow-x:auto;scrollbar-width:none">
+    ${days7.map(d=>{
+      const isSel=d.date===selectedDay;
+      const isToday=d.date===today();
+      return `<div data-week-day="${d.date}" style="flex-shrink:0;width:44px;text-align:center;cursor:pointer;padding:8px 4px;border-radius:var(--r);background:${isSel?"var(--accent)":"var(--bg2)"};border:1px solid ${isSel?"var(--accent)":d.logged?"var(--border)":"var(--border)"};transition:all .15s">
+        <div style="font-size:10px;font-weight:700;color:${isSel?"white":isToday?"var(--accent)":"var(--muted)"}">${d.label}</div>
+        <div style="font-family:var(--font-d);font-size:18px;color:${isSel?"white":"var(--text)"};margin:2px 0">${d.dayNum}</div>
+        <div style="width:6px;height:6px;border-radius:50%;background:${d.logged?(isSel?"white":"var(--green)"):"transparent"};margin:0 auto"></div>
+      </div>`;
+    }).join("")}
+  </div>
+
+  <!-- Selected day food log -->
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div>
+        <div class="ct" style="margin-bottom:0">${new Date(selectedDay+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px">${selSum.cal} kcal · P:${ri(selSum.p)}g · C:${ri(selSum.c)}g · F:${ri(selSum.f)}g${selWater?` · 💧${selWater.liters}L`:""}</div>
+      </div>
+      <button class="btn bp" style="font-size:12px;padding:8px 14px" data-action="open-food-for-day" data-date="${selectedDay}">+ Add</button>
+    </div>
+    <!-- Macro bars for selected day -->
+    ${[
+      {label:"Calories",val:selSum.cal,target:TARGETS.cal,color:"#f97316",unit:"kcal"},
+      {label:"Protein", val:ri(selSum.p),target:TARGETS.p, color:"#22c55e",unit:"g"},
+      {label:"Carbs",   val:ri(selSum.c),target:TARGETS.c, color:"#4f8ef7",unit:"g"},
+      {label:"Fat",     val:ri(selSum.f),target:TARGETS.f, color:"#eab308",unit:"g"},
+    ].map(m=>{
+      const pct=Math.min(100,(m.val/m.target)*100).toFixed(1);
+      const over=m.val>m.target;
+      return `<div class="pb-row"><div class="pb-label"><span class="pb-name" style="font-size:11px">${m.label}</span><span class="pb-val">${m.val}${m.unit} / ${m.target}${m.unit}</span></div><div class="pb-wrap"><div class="pb-fill" style="width:${pct}%;background:${over?"var(--red)":m.color}"></div></div></div>`;
+    }).join("")}
+    ${selEntries.length===0?
+      `<div style="text-align:center;padding:16px;color:var(--muted);font-size:13px">No food logged for this day</div>`:
+      selEntries.map(e=>`<div class="food-item">
+        <div class="food-dot" style="background:${e.p>30?"#22c55e":e.cal>400?"#f97316":"#4f8ef7"}"></div>
+        <div class="food-info"><div class="food-name">${e.name}</div><div class="food-macros">${e.grams}g · ${e.cal} kcal · P:${ri(e.p)}g C:${ri(e.c)}g F:${ri(e.f)}g</div></div>
+        <button style="background:none;border:none;color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;padding:4px 6px;font-family:var(--font-b)" data-edit-food="${e.id}">Edit</button>
+        <button class="food-del" data-del-food="${e.id}">×</button>
+      </div>`).join("")}
+  </div>
+
+  <!-- Protein streak -->
+  <div class="card"><div class="ct">Protein Streak — hit ${TARGETS.p}g (14 days)</div>
+    <div class="streak-row">${proteinStreak().map(d=>`<div class="streak-day${d.hit?" hit":d.logged?" miss":""}">${d.label}</div>`).join("")}</div>
+  </div>`;
 }
 
 // ── FOOD MODAL ─────────────────────────────────────
@@ -1357,9 +1848,52 @@ function renderCheatSheet() {
 // ── BODY STATS ─────────────────────────────────────
 function renderBody() {
   const stats=[...ST.bodyStats].sort((a,b)=>new Date(a.date)-new Date(b.date));
+  // Filter to last 4 weeks
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-28);
+  const recent = stats.filter(s=>new Date(s.date+"T12:00:00")>=cutoff);
+
+  const measurements = [
+    {key:"waist",  label:"Waist"},
+    {key:"hips",   label:"Hips"},
+    {key:"chest",  label:"Chest"},
+    {key:"r_arm",  label:"R Arm"},
+    {key:"l_arm",  label:"L Arm"},
+    {key:"r_thigh",label:"R Thigh"},
+    {key:"l_thigh",label:"L Thigh"},
+  ];
+  const hasAnyMeasurement = recent.some(s=>measurements.some(m=>s[m.key]));
+  const hasWeightData = recent.length >= 2;
+
   return `
   <div class="ph"><div class="pt">BODY STATS</div><div class="ps">Track weight, body fat & measurements</div></div>
   <div style="padding:12px 16px 0"><button class="btn bp bfull" data-action="open-body">+ Log Today's Stats</button></div>
+
+  ${hasWeightData?`
+  <div class="card" style="margin-top:12px">
+    <div class="ct">Weight & Body Fat — Last 4 Weeks</div>
+    <div style="position:relative;height:220px">
+      <canvas id="chart-wb"></canvas>
+    </div>
+    <div style="display:flex;justify-content:center;gap:20px;margin-top:8px;font-size:11px">
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:3px;background:#4f8ef7;display:inline-block;border-radius:2px"></span>Weight (lbs) ←</span>
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:3px;background:#ef4444;display:inline-block;border-radius:2px"></span>Body Fat % →</span>
+    </div>
+  </div>`:""}
+
+  ${hasAnyMeasurement?`
+  <div class="card">
+    <div class="ct">Measurements — Last 4 Weeks</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">
+      ${measurements.filter(m=>recent.some(s=>s[m.key])).map(m=>`
+        <button data-meas="${m.key}" style="padding:6px 12px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${ST.selectedMeasurement===m.key?"var(--accent)":"var(--border)"};background:${ST.selectedMeasurement===m.key?"rgba(79,142,247,.15)":"var(--bg3)"};color:${ST.selectedMeasurement===m.key?"var(--accent)":"var(--muted)"}">
+          ${m.label}
+        </button>`).join("")}
+    </div>
+    <div style="position:relative;height:190px">
+      <canvas id="chart-meas"></canvas>
+    </div>
+  </div>`:""}
+
   <div class="card"><div class="ct">History</div>
     ${ST.bodyStats.length===0?'<div class="empty"><div class="empty-icon">📊</div><div>No stats yet.</div></div>':
       ST.bodyStats.map(s=>{
@@ -1453,9 +1987,47 @@ function renderHistory() {
   ${ST.historyTab==="prs" ? `
     ${prs.length===0?`<div class="empty"><div class="empty-icon">🏆</div><div>Log your first workout to start tracking PRs!</div></div>`:`<div class="card" style="padding:0">${prs.map(([name,pr],i)=>`<div class="pr-item"><div class="pr-rank">${i<3?["🥇","🥈","🥉"][i]:(i+1)}</div><div class="pr-info"><div class="pr-name">${name}</div><div class="pr-date">${fmtDate(pr.date)} · ${PLAN[pr.dayId]?.label||pr.dayId}</div></div><div class="pr-wt"><div class="pr-lbs" style="color:${PLAN[pr.dayId]?.color||"#4f8ef7"}">${pr.weight}</div><div class="pr-unit">lbs</div></div></div>`).join("")}</div>`}
   ` : `
-    ${ST.workoutLogs.length===0?`<div class="empty"><div class="empty-icon">📅</div><div>Log your first workout to see history.</div></div>`:ST.workoutLogs.map(log=>{const plan=PLAN[log.dayId]||{},open=ST.expandedLog===log.id,vol=getVolume(log),sets=(log.exercises||[]).reduce((t,e)=>t+(e.sets||[]).length,0);return`<div class="log-item"><div class="log-hdr" data-exp-log="${log.id}"><div class="log-dot" style="background:${plan.color||"#666"}"></div><div class="log-info"><div class="log-title">${plan.emoji||""} ${plan.title||log.dayId}</div><div class="log-date">${fmtDate(log.date)} · ${log.duration||"—"}</div></div><div style="color:var(--muted);font-size:18px;${open?"transform:rotate(180deg)":""}">⌄</div></div><div class="log-stats"><div class="log-stat">Sets: <strong>${sets}</strong></div><div class="log-stat">Volume: <strong>${vol>0?vol.toLocaleString()+" lbs":"—"}</strong></div><div class="log-stat">Exercises: <strong>${(log.exercises||[]).length}</strong></div></div>${open?`<div class="log-detail">${(log.exercises||[]).map(ex=>`<div class="log-ex"><div class="log-ex-name">${ex.name}</div><div class="log-ex-sets">${(ex.sets||[]).filter(s=>s.done||s.weight||s.reps).map((s,i)=>`Set ${i+1}: ${s.weight?s.weight+"lbs":"—"} × ${s.reps||"—"}`).join(" · ")||"No sets recorded"}</div></div>`).join("")}</div>`:""}</div>`;}).join("")}
+    ${ST.workoutLogs.length===0?`<div class="empty"><div class="empty-icon">📅</div><div>Log your first workout to see history.</div></div>`:ST.workoutLogs.map(log=>{
+      const plan=PLAN[log.dayId]||{},open=ST.expandedLog===log.id,vol=getVolume(log),sets=(log.exercises||[]).reduce((t,e)=>t+(e.sets||[]).length,0);
+      return`<div class="log-item">
+        <div class="log-hdr" data-exp-log="${log.id}"><div class="log-dot" style="background:${plan.color||"#666"}"></div><div class="log-info"><div class="log-title">${plan.emoji||""} ${plan.title||log.dayId}</div><div class="log-date">${fmtDate(log.date)} · ${log.duration||"—"}</div></div><div style="color:var(--muted);font-size:18px;${open?"transform:rotate(180deg)":""}">⌄</div></div>
+        <div class="log-stats">
+          <div class="log-stat">Sets: <strong>${sets}</strong></div>
+          <div class="log-stat">Volume: <strong>${vol>0?vol.toLocaleString()+" lbs":"—"}</strong></div>
+          <div style="margin-left:auto;display:flex;gap:6px">
+            <button style="background:none;border:none;color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);padding:4px 8px" data-edit-log="${log.id}">Edit</button>
+            <button style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:4px" data-del-log="${log.id}">×</button>
+          </div>
+        </div>
+        ${open?`<div class="log-detail">${(log.exercises||[]).map(ex=>`<div class="log-ex"><div class="log-ex-name">${ex.name}</div><div class="log-ex-sets">${(ex.sets||[]).filter(s=>s.done||s.weight||s.reps).map((s,i)=>`Set ${i+1}: ${s.weight?s.weight+"lbs":"—"} × ${s.reps||"—"}`).join(" · ")||"No sets recorded"}</div></div>`).join("")}</div>`:""}
+      </div>`;}).join("")}
   `}
   <div style="height:20px"></div>`;
+}
+
+function renderEditLogModal() {
+  const log = ST.editingLog;
+  if(!log) return "";
+  const plan = PLAN[log.dayId]||{};
+  return `<div class="moverlay" data-action="close-edit-log"><div class="modal" onclick="event.stopPropagation()" style="max-height:92dvh">
+    <div class="mhandle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="font-family:var(--font-d);font-size:24px;letter-spacing:1px">${plan.emoji||""} ${plan.title||log.dayId}</div>
+      <div style="font-size:12px;color:var(--muted)">${fmtDate(log.date)}</div>
+    </div>
+    ${(log.exercises||[]).map((ex,ei)=>`
+      <div style="margin-bottom:16px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:8px;color:${plan.color||"var(--accent)"}">${ex.name}</div>
+        ${(ex.sets||[]).map((set,si)=>`
+          <div style="display:grid;grid-template-columns:32px 1fr 1fr 32px;gap:6px;margin-bottom:6px;align-items:center">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);text-align:center">${si+1}</div>
+            <input class="sinput" type="number" inputmode="decimal" placeholder="lbs" value="${set.weight||""}" data-elw="${ei}" data-esi="${si}">
+            <input class="sinput" type="number" inputmode="numeric" placeholder="reps" value="${set.reps||""}" data-elr="${ei}" data-esi="${si}">
+            <button style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer" data-del-log-set="${ei}-${si}">×</button>
+          </div>`).join("")}
+      </div>`).join("")}
+    <button class="btn bp bfull blg" data-action="save-edit-log">Save Changes</button>
+  </div></div>`;
 }
 
 // ── PRs are now inside renderHistory via historyTab toggle ──
@@ -1464,35 +2036,205 @@ function renderHistory() {
 // CHARTS
 // ══════════════════════════════════════════════════
 function mkLine() {}
-function renderCharts() {}
+
+function renderCharts() {
+  if(ST.tab !== "body") return;
+  if(typeof Chart === "undefined") return;
+
+  const cutoff = new Date(); cutoff.setDate(cutoff.getDate()-28);
+  const stats = [...ST.bodyStats]
+    .sort((a,b)=>new Date(a.date)-new Date(b.date))
+    .filter(s=>new Date(s.date+"T12:00:00")>=cutoff);
+
+  if(stats.length < 2) return;
+
+  const labels = stats.map(s=>new Date(s.date+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"}));
+  const gridColor = "#2a2a3a";
+  const tickColor = "#6b6b88";
+
+  // Chart 1: Weight (left axis) + Body Fat % (right axis)
+  const wbEl = document.getElementById("chart-wb");
+  if(wbEl && !ST.charts["chart-wb"]) {
+    ST.charts["chart-wb"] = new Chart(wbEl.getContext("2d"), {
+      data: {
+        labels,
+        datasets: [
+          {
+            type:"line", label:"Weight (lbs)",
+            data: stats.map(s=>s.weight||null),
+            borderColor:"#4f8ef7", backgroundColor:"rgba(79,142,247,.1)",
+            borderWidth:2.5, pointBackgroundColor:"#4f8ef7", pointRadius:4,
+            fill:true, tension:.35, spanGaps:true, yAxisID:"y"
+          },
+          {
+            type:"line", label:"Body Fat %",
+            data: stats.map(s=>s.bf||null),
+            borderColor:"#ef4444", backgroundColor:"rgba(239,68,68,.0)",
+            borderWidth:2.5, pointBackgroundColor:"#ef4444", pointRadius:4,
+            fill:false, tension:.35, spanGaps:true, yAxisID:"y2"
+          }
+        ]
+      },
+      options: {
+        responsive:true, maintainAspectRatio:false,
+        interaction:{mode:"index", intersect:false},
+        plugins:{legend:{display:false}, tooltip:{
+          backgroundColor:"rgba(18,18,26,.95)", borderColor:"#2a2a3a", borderWidth:1,
+          titleColor:"#f0f0f8", bodyColor:"#9090aa",
+          callbacks:{label:function(ctx){return ctx.dataset.label+": "+ctx.parsed.y+(ctx.datasetIndex===1?"%":" lbs");}}
+        }},
+        scales:{
+          x:{ticks:{color:tickColor,font:{size:9},maxRotation:45}, grid:{color:gridColor}},
+          y:{
+            position:"left", ticks:{color:"#4f8ef7",font:{size:9},callback:v=>v+" lbs"},
+            grid:{color:gridColor},
+            title:{display:true,text:"Weight",color:"#4f8ef7",font:{size:10}}
+          },
+          y2:{
+            position:"right", ticks:{color:"#ef4444",font:{size:9},callback:v=>v+"%"},
+            grid:{drawOnChartArea:false},
+            title:{display:true,text:"Body Fat %",color:"#ef4444",font:{size:10}}
+          }
+        }
+      }
+    });
+  }
+
+  // Chart 2: Selected measurement
+  const measEl = document.getElementById("chart-meas");
+  if(measEl) {
+    const measKey = ST.selectedMeasurement || "waist";
+    const measLabels = {waist:"Waist",hips:"Hips",chest:"Chest",r_arm:"Right Arm",l_arm:"Left Arm",r_thigh:"Right Thigh",l_thigh:"Left Thigh"};
+    const measColors = {waist:"#f97316",hips:"#a855f7",chest:"#06b6d4",r_arm:"#22c55e",l_arm:"#4f8ef7",r_thigh:"#eab308",l_thigh:"#ef4444"};
+    const color = measColors[measKey] || "#4f8ef7";
+    const label = measLabels[measKey] || measKey;
+
+    if(ST.charts["chart-meas"]) { try{ST.charts["chart-meas"].destroy();}catch{} }
+    ST.charts["chart-meas"] = new Chart(measEl.getContext("2d"), {
+      type:"line",
+      data:{
+        labels,
+        datasets:[{
+          label:label+" (inches)",
+          data:stats.map(s=>s[measKey]||null),
+          borderColor:color, backgroundColor:color+"22",
+          borderWidth:2.5, pointBackgroundColor:color, pointRadius:4,
+          fill:true, tension:.35, spanGaps:true
+        }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{legend:{display:false}, tooltip:{
+          backgroundColor:"rgba(18,18,26,.95)", borderColor:"#2a2a3a", borderWidth:1,
+          titleColor:"#f0f0f8", bodyColor:"#9090aa",
+          callbacks:{label:function(ctx){return label+": "+ctx.parsed.y+'"';}}
+        }},
+        scales:{
+          x:{ticks:{color:tickColor,font:{size:9},maxRotation:45},grid:{color:gridColor}},
+          y:{ticks:{color:tickColor,font:{size:9},callback:v=>v+'"'},grid:{color:gridColor}}
+        }
+      }
+    });
+  }
+}
 
 // ══════════════════════════════════════════════════
 // REST TIMER
 // ══════════════════════════════════════════════════
 let timerInt = null;
-function startTimer(rest) {
-  stopTimer();
-  const map = {"3 min":180,"2 min":120,"90 sec":90,"60 sec":60,"45 sec":45};
-  const secs = Object.entries(map).reduce((a,[k,v])=>rest&&rest.includes(k.split(" ")[0])?v:a, 90);
-  ST.restTimer = {secs, total:secs};
-  timerInt = setInterval(()=>{
-    if(!ST.restTimer){clearInterval(timerInt);return;}
-    ST.restTimer.secs--;
-    if(ST.restTimer.secs<=0){stopTimer();}
-    else {
-      const tc=document.getElementById("rtc"), tb=document.getElementById("rtb");
-      const m=Math.floor(ST.restTimer.secs/60), s=ST.restTimer.secs%60;
-      if(tc) tc.textContent=`${m}:${s.toString().padStart(2,"0")}`;
-      if(tb) tb.style.width=`${(ST.restTimer.secs/ST.restTimer.total)*100}%`;
-    }
-  }, 1000);
-  if(!document.querySelector(".rtimer")) {
-    const div=document.createElement("div"); div.id="timer-host";
-    document.getElementById("app").appendChild(div);
-    div.outerHTML = renderTimer();
+let timerEndTime = null; // absolute end time so background doesn't drift
+
+function requestNotificationPermission() {
+  if("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission();
   }
 }
-function stopTimer() { clearInterval(timerInt); ST.restTimer=null; const el=document.querySelector(".rtimer"); if(el)el.remove(); }
+
+function sendRestDoneNotification(restLabel) {
+  // 1. Vibrate
+  if(navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 500]);
+
+  // 2. Play beep tones using Web Audio API (no external files needed)
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var playBeep = function(freq, start, dur) {
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0.4, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + dur);
+    };
+    // Three ascending beeps
+    playBeep(440, 0,    0.15);
+    playBeep(550, 0.2,  0.15);
+    playBeep(660, 0.4,  0.3);
+  } catch(e) {}
+
+  // 3. Speak "Next set!" using Speech Synthesis
+  try {
+    var msg = new SpeechSynthesisUtterance("Next set!");
+    msg.volume = 1;
+    msg.rate   = 0.9;
+    msg.pitch  = 1.1;
+    window.speechSynthesis.speak(msg);
+  } catch(e) {}
+
+  // 4. Push notification (if permission granted)
+  if("Notification" in window && Notification.permission === "granted") {
+    new Notification("Rest done! 💪", {
+      body: "Time to hit your next set",
+      tag: "rest-timer",
+      requireInteraction: false
+    });
+  }
+}
+
+function startTimer(rest) {
+  stopTimer();
+  requestNotificationPermission();
+  const map = {"3 min":180,"2 min":120,"90 sec":90,"60 sec":60,"45 sec":45};
+  const secs = Object.entries(map).reduce((a,[k,v])=>rest&&rest.includes(k.split(" ")[0])?v:a, 90);
+  timerEndTime = Date.now() + secs * 1000;
+  ST.restTimer = {secs, total:secs};
+
+  // Render timer UI
+  const existing = document.querySelector(".rtimer");
+  if(!existing) {
+    const div = document.createElement("div");
+    document.getElementById("app")?.appendChild(div);
+    div.outerHTML = renderTimer();
+  }
+
+  timerInt = setInterval(()=>{
+    if(!ST.restTimer || !timerEndTime) { clearInterval(timerInt); return; }
+    // Use absolute time so background doesn't cause drift
+    const remaining = Math.round((timerEndTime - Date.now()) / 1000);
+    if(remaining <= 0) {
+      stopTimer();
+      sendRestDoneNotification(rest);
+      return;
+    }
+    ST.restTimer.secs = remaining;
+    const tc=document.getElementById("rtc"), tb=document.getElementById("rtb");
+    const m=Math.floor(remaining/60), s=remaining%60;
+    if(tc) tc.textContent=`${m}:${s.toString().padStart(2,"0")}`;
+    if(tb) tb.style.width=`${(remaining/ST.restTimer.total)*100}%`;
+  }, 500); // check every 500ms for accuracy
+}
+
+function stopTimer() {
+  clearInterval(timerInt);
+  timerInt = null;
+  timerEndTime = null;
+  ST.restTimer = null;
+  const el = document.querySelector(".rtimer");
+  if(el) el.remove();
+}
 
 function addWater(amt) {
   const t=today(); let log=ST.nutritionLogs.find(l=>l.date===t&&l.type==="water");
@@ -1531,11 +2273,19 @@ function attachAll() {
   const $ = sel => document.querySelector(sel);
   const $$ = sel => document.querySelectorAll(sel);
 
-  // NAV
+  // NAV — save scroll position of current tab before switching
   $$("[data-nav]").forEach(el=>el.addEventListener("click",()=>{
-    ST.tab=el.dataset.nav;
-    if(ST.tab!=="workout"){ST.activeDay=null;ST.activeSets={};ST.openEx={};ST.openGuide={};}
+    // Save scroll of the tab we're LEAVING
+    const pg = document.getElementById("pg");
+    if(pg) ST["scroll_" + ST.tab] = pg.scrollTop;
+    // Switch tab
+    ST.tab = el.dataset.nav;
     render();
+    // Restore scroll of the tab we're ENTERING (after render builds the new page)
+    const newPg = document.getElementById("pg");
+    if(newPg && ST["scroll_" + ST.tab]) {
+      newPg.scrollTop = ST["scroll_" + ST.tab];
+    }
   }));
 
   // START DAY
@@ -1636,6 +2386,14 @@ function attachAll() {
     }
   }));
 
+  // MEASUREMENT CHART SELECTOR
+  $$("[data-meas]").forEach(el=>el.addEventListener("click",()=>{
+    ST.selectedMeasurement=el.dataset.meas;
+    // Destroy measurement chart so renderCharts rebuilds it
+    if(ST.charts["chart-meas"]){try{ST.charts["chart-meas"].destroy();}catch{} delete ST.charts["chart-meas"];}
+    render();
+  }));
+
   // BODY MODAL
   $("[data-action='open-body']")?.addEventListener("click",()=>{ST.showBodyModal=true;ST.editingStat=null;render();});
   $("[data-action='close-body']")?.addEventListener("click",()=>{ST.showBodyModal=false;ST.editingStat=null;render();});
@@ -1688,6 +2446,19 @@ function attachAll() {
   // WATER
   $$("[data-water]").forEach(el=>el.addEventListener("click",()=>addWater(parseFloat(el.dataset.water))));
 
+  // WEEK DAY SELECTION (This Week tab)
+  $$("[data-week-day]").forEach(el=>el.addEventListener("click",()=>{
+    ST.weekDay=el.dataset.weekDay; render();
+  }));
+
+  // OPEN FOOD MODAL FOR A SPECIFIC DAY (This Week view)
+  $$("[data-action='open-food-for-day']").forEach(el=>el.addEventListener("click",()=>{
+    ST.weekDay=el.dataset.date||today();
+    ST.showFoodModal=true; ST.foodSearch=""; ST.foodResults=[]; ST.foodEntry={food:null,grams:""}; ST.editingFood=null;
+    render();
+    setTimeout(()=>document.getElementById("food-search-input")?.focus(),100);
+  }));
+
   // NUTRITION TAB
   $$("[data-nut-tab]").forEach(el=>el.addEventListener("click",()=>{ST.nutTab=el.dataset.nutTab;render();}));
 
@@ -1718,6 +2489,43 @@ function attachAll() {
 
   // HISTORY EXPAND
   $$("[data-exp-log]").forEach(el=>el.addEventListener("click",()=>{ST.expandedLog=ST.expandedLog===el.dataset.expLog?null:el.dataset.expLog;render();}));
+
+  // EDIT LOG
+  $$("[data-edit-log]").forEach(el=>el.addEventListener("click",e=>{
+    e.stopPropagation();
+    const log = ST.workoutLogs.find(l=>l.id===el.dataset.editLog);
+    if(log) { ST.editingLog = JSON.parse(JSON.stringify(log)); render(); } // deep copy
+  }));
+
+  // DELETE LOG
+  $$("[data-del-log]").forEach(el=>el.addEventListener("click",e=>{
+    e.stopPropagation();
+    if(!confirm("Delete this workout session?")) return;
+    const id=el.dataset.delLog;
+    ST.workoutLogs=ST.workoutLogs.filter(l=>l.id!==id);
+    save(); deleteFromCloud("workout_logs",id); render();
+  }));
+
+  // EDIT LOG MODAL
+  $("[data-action='close-edit-log']")?.addEventListener("click",()=>{ST.editingLog=null;render();});
+  $("[data-action='save-edit-log']")?.addEventListener("click",()=>{
+    if(!ST.editingLog) return;
+    const idx=ST.workoutLogs.findIndex(l=>l.id===ST.editingLog.id);
+    if(idx>=0){ ST.workoutLogs[idx]=ST.editingLog; saveWorkoutLog(ST.editingLog); }
+    ST.editingLog=null; render();
+  });
+  $$("[data-elw]").forEach(el=>el.addEventListener("input",()=>{
+    const ei=+el.dataset.elw, si=+el.dataset.esi;
+    if(ST.editingLog?.exercises?.[ei]?.sets?.[si]) ST.editingLog.exercises[ei].sets[si].weight=el.value;
+  }));
+  $$("[data-elr]").forEach(el=>el.addEventListener("input",()=>{
+    const ei=+el.dataset.elr, si=+el.dataset.esi;
+    if(ST.editingLog?.exercises?.[ei]?.sets?.[si]) ST.editingLog.exercises[ei].sets[si].reps=el.value;
+  }));
+  $$("[data-del-log-set]").forEach(el=>el.addEventListener("click",()=>{
+    const [ei,si]=el.dataset.delLogSet.split("-").map(Number);
+    if(ST.editingLog?.exercises?.[ei]?.sets) { ST.editingLog.exercises[ei].sets.splice(si,1); render(); }
+  }));
 
   // AI COACH
   $("[data-action='run-ai']")?.addEventListener("click",runAI);
@@ -1777,6 +2585,9 @@ function attachAll() {
   // EXPORT / IMPORT
   $("[data-action='export']")?.addEventListener("click",exportData);
   document.getElementById("import-file")?.addEventListener("change",e=>{if(e.target.files[0])importData(e.target.files[0]);});
+
+  // Attach sleep/steps surgical listeners
+  attachSleepSteps();
 }
 
 // Attach listeners inside the food modal .modal div
@@ -1863,7 +2674,8 @@ function attachFoodModalInner() {
         saveNutritionLog(updated);
         ST.editingFood=null;
       } else {
-        var entry={id:Date.now().toString(),date:today(),type:"food",name:ST.foodEntry.food.n,grams:parseFloat(ST.foodEntry.grams),cal:m.cal,p:m.p,c:m.c,f:m.f};
+        var logDate = (ST.nutTab==="week" && ST.weekDay) ? ST.weekDay : today();
+        var entry={id:Date.now().toString(),date:logDate,type:"food",name:ST.foodEntry.food.n,grams:parseFloat(ST.foodEntry.grams),cal:m.cal,p:m.p,c:m.c,f:m.f};
         ST.nutritionLogs.unshift(entry);
         saveNutritionLog(entry);
       }
@@ -1886,6 +2698,8 @@ function loadFromCache() {
   ST.bodyStats     = S.get("bs", [{id:"init", date:new Date().toISOString().split("T")[0], weight:173, bf:19, waist:null, notes:"Starting point"}]);
   ST.nutritionLogs = S.get("nl", []);
   ST.aiReports     = S.get("air", []);
+  ST.customFoods   = S.get("cf", []);
+  ST.dailyLogs     = S.get("dl", []);
   ST.online        = false;
 }
 
@@ -1902,21 +2716,26 @@ function boot() {
     sbSelect("workout_logs"),
     sbSelect("body_stats"),
     sbSelect("nutrition_logs"),
-    sbSelect("ai_reports")
+    sbSelect("ai_reports"),
+    sbSelect("custom_foods"),
+    sbSelect("daily_logs")
   ]).then(function(results) {
     clearTimeout(timer);
-    var wl = results[0], bs = results[1], nl = results[2], air = results[3];
+    var wl = results[0], bs = results[1], nl = results[2], air = results[3], cf = results[4], dl = results[5];
 
     if(wl !== null) {
       ST.workoutLogs   = wl.map(function(r)  { return {id:r.id, dayId:r.day_id, date:r.date, duration:r.duration, exercises:r.exercises||[]}; });
       ST.bodyStats     = bs.map(function(r)  { return {id:r.id, date:r.date, weight:r.weight, bf:r.bf, waist:r.waist, chest:r.chest, hips:r.hips, r_arm:r.r_arm, l_arm:r.l_arm, r_thigh:r.r_thigh, l_thigh:r.l_thigh, sleep:r.sleep, notes:r.notes, photo_path:r.photo_path||null}; });
       ST.nutritionLogs = nl.map(function(r)  { return {id:r.id, date:r.date, type:r.type, name:r.name, grams:r.grams, cal:r.cal, p:r.p, c:r.c, f:r.f, liters:r.liters}; });
       ST.aiReports     = air.map(function(r) { return {id:r.id, date:r.date, report:r.report, snapshot:r.snapshot}; });
-      // Update local cache
+      ST.customFoods   = (cf||[]).map(function(r) { return {id:r.id, n:r.name, cal:r.cal, p:r.p, c:r.c, f:r.f, cat:r.cat||"Custom", serving_label:r.serving_label, serving_grams:r.serving_grams, food_type:r.food_type||"A", source:r.source||"claude"}; });
+      ST.dailyLogs     = (dl||[]).map(function(r) { return {id:r.id, date:r.date, steps:r.steps, sleep_hours:r.sleep_hours}; });
       S.set("wl",  ST.workoutLogs);
       S.set("bs",  ST.bodyStats);
       S.set("nl",  ST.nutritionLogs);
       S.set("air", ST.aiReports);
+      S.set("cf",  ST.customFoods);
+      S.set("dl",  ST.dailyLogs);
       ST.online = true;
     } else {
       loadFromCache();
