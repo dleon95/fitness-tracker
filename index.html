@@ -1976,11 +1976,11 @@ function renderEditCustomFoodModal() {
 function renderCheatPanel() {
   const cats = ["All","Protein","Carbs","Fat","Vegetable","Dairy","Condiment","Supplement","Peruvian","Chinese","Mexican","Italian","American","Thai"];
   const myFoodsHTML = ST.customFoods.length > 0 ? `
-    <div style="margin:0 16px 8px">
-      <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--purple);margin-bottom:8px">🤖 My Saved Foods (${ST.customFoods.length})</div>
+    <div style="margin:0 16px 8px" data-custom-foods-section>
+      <div style="font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--purple);margin-bottom:8px" data-custom-foods-count>🤖 My Saved Foods (${ST.customFoods.length})</div>
       <div style="background:var(--bg2);border:1px solid rgba(168,85,247,.3);border-radius:var(--r);overflow:hidden">
         ${ST.customFoods.map(f=>`
-          <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border)">
+          <div data-custom-food-row style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border)">
             <div style="flex:1">
               <div style="font-weight:600;font-size:13px">${f.n}</div>
               <div style="font-size:11px;color:var(--muted);margin-top:2px">
@@ -2001,7 +2001,7 @@ function renderCheatPanel() {
       <div class="mhandle"></div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:0 16px 12px">
         <div style="font-family:var(--font-d);font-size:24px;letter-spacing:1px">FOOD CHEAT SHEET</div>
-        <button data-action="close-cheat" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:4px">✕</button>
+        <button id="close-cheat-btn" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:4px">✕</button>
       </div>
       <div class="cs-search" style="margin:0 16px 8px"><div class="cs-icon">🔍</div><input id="cs-search-input" type="text" placeholder="Search foods…" value="${ST.csSearch}" autocomplete="off"></div>
       <div class="cs-filter" style="padding:0 16px 8px">${cats.map(c=>`<div class="cs-pill${ST.csFilter===c?" active":""}" data-cs-filter="${c}">${c}</div>`).join("")}</div>
@@ -2802,22 +2802,23 @@ function attachAll() {
   $("[data-action='save-body']")?.addEventListener("click",()=>{
     var editing = ST.editingStat;
     var stat = {
-      id:      editing ? editing.id : Date.now().toString(),
-      date:    $("#stat-date")?.value || today(),
-      weight:  parseFloat($("#stat-weight")?.value)||null,
-      bf:      parseFloat($("#stat-bf")?.value)||null,
-      waist:   parseFloat($("#stat-waist")?.value)||null,
-      hips:    parseFloat($("#stat-hips")?.value)||null,
-      chest:   parseFloat($("#stat-chest")?.value)||null,
-      r_arm:   parseFloat($("#stat-r-arm")?.value)||null,
-      l_arm:   parseFloat($("#stat-l-arm")?.value)||null,
-      r_thigh: parseFloat($("#stat-r-thigh")?.value)||null,
-      l_thigh: parseFloat($("#stat-l-thigh")?.value)||null,
-      sleep:   parseFloat($("#stat-sleep")?.value)||null,
-      notes:   $("#stat-notes")?.value||""
+      id:        editing ? editing.id : Date.now().toString(),
+      date:      $("#stat-date")?.value || today(),
+      weight:    parseFloat($("#stat-weight")?.value)||null,
+      bf:        parseFloat($("#stat-bf")?.value)||null,
+      waist:     parseFloat($("#stat-waist")?.value)||null,
+      hips:      parseFloat($("#stat-hips")?.value)||null,
+      chest:     parseFloat($("#stat-chest")?.value)||null,
+      r_arm:     parseFloat($("#stat-r-arm")?.value)||null,
+      l_arm:     parseFloat($("#stat-l-arm")?.value)||null,
+      r_thigh:   parseFloat($("#stat-r-thigh")?.value)||null,
+      l_thigh:   parseFloat($("#stat-l-thigh")?.value)||null,
+      sleep:     parseFloat($("#stat-sleep")?.value)||null,
+      notes:     $("#stat-notes")?.value||"",
+      // Preserve existing photos — never overwrite with null on edit
+      photo_path: editing ? editing.photo_path||null : null
     };
     if(editing) {
-      // Replace existing entry
       var idx = ST.bodyStats.findIndex(function(s){return s.id===editing.id;});
       if(idx>=0) ST.bodyStats[idx] = stat;
     } else {
@@ -2970,6 +2971,9 @@ function attachAll() {
   // CHEAT SHEET PANEL
   $("[data-action='open-cheat']")?.addEventListener("click",()=>{ST.showCheatPanel=true;render();});
   $("[data-action='close-cheat']")?.addEventListener("click",()=>{ST.showCheatPanel=false;render();});
+  document.getElementById("close-cheat-btn")?.addEventListener("click",function(e){
+    e.stopPropagation(); ST.showCheatPanel=false; render();
+  });
   // Delete custom food
   // EDIT CUSTOM FOOD
   $$("[data-edit-custom]").forEach(el=>el.addEventListener("click",e=>{
@@ -3007,9 +3011,22 @@ function attachAll() {
     var food = ST.customFoods.find(function(f){return f.n===name;});
     ST.customFoods = ST.customFoods.filter(function(f){return f.n!==name;});
     save();
-    // Delete from Supabase using the food's id
     if(food && food.id) deleteFromCloud("custom_foods", food.id);
-    render();
+    // Remove just the food row from the DOM — no full render
+    var row = el.closest("[data-custom-food-row]");
+    if(row) {
+      row.remove();
+      // Update the count in the header
+      var header = document.querySelector("[data-custom-foods-count]");
+      if(header) header.textContent = "🤖 My Saved Foods (" + ST.customFoods.length + ")";
+      // If no more custom foods, remove the whole section
+      if(ST.customFoods.length === 0) {
+        var section = document.querySelector("[data-custom-foods-section]");
+        if(section) section.remove();
+      }
+    } else {
+      render();
+    }
   }));
 
   // HISTORY TAB TOGGLE (Log / PRs)
