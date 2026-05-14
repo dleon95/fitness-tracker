@@ -267,11 +267,9 @@ function sbDelete(table, id) {
 
 // ── Supabase Storage (progress photos) ──────────────
 async function sbUploadPhoto(statId, file) {
-  // iPhone photos: file.name may be "image.jpg" or similar, type is "image/jpeg"
   var ext = "jpg";
   if(file.type === "image/png") ext = "png";
-  else if(file.type === "image/heic" || file.type === "image/heif") ext = "jpg"; // convert heic to jpg label
-  var path = "photo_" + statId + "." + ext;
+  var path = "photo_" + statId + "_" + Date.now() + "." + ext;
   console.log("Uploading photo:", path, "type:", file.type, "size:", file.size);
   try {
     var resp = await fetch(SUPA_URL + "/storage/v1/object/progress-photos/" + path, {
@@ -279,7 +277,7 @@ async function sbUploadPhoto(statId, file) {
       headers: {
         "apikey": SUPA_KEY,
         "Authorization": "Bearer " + SUPA_KEY,
-        "Content-Type": "image/jpeg",  // force jpeg — works for all iPhone photos
+        "Content-Type": "image/jpeg",
         "x-upsert": "true"
       },
       body: file
@@ -305,9 +303,23 @@ async function sbDeletePhoto(path) {
 
 function sbPhotoUrl(path) {
   if(!path) return "";
-  // Handle cases where path might already include the bucket name
   var cleanPath = path.replace(/^progress-photos\/?/, "");
   return SUPA_URL + "/storage/v1/object/public/progress-photos/" + cleanPath;
+}
+
+// Photo array helpers — photo_path stored as JSON array string in Supabase
+function getPhotos(stat) {
+  if(!stat.photo_path) return [];
+  try {
+    var parsed = JSON.parse(stat.photo_path);
+    return Array.isArray(parsed) ? parsed : [stat.photo_path]; // handle legacy single string
+  } catch(e) {
+    return stat.photo_path ? [stat.photo_path] : []; // legacy single string
+  }
+}
+
+function setPhotos(stat, photos) {
+  stat.photo_path = photos.length > 0 ? JSON.stringify(photos) : null;
 }
 
 // ══════════════════════════════════════════════════
@@ -540,7 +552,7 @@ const ST = {
   charts: {},
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {},
   restTimer: null,
-  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null,
+  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null,
   expandedLog: null,
   foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""}, photoLookingUp: false,
   nutTab: "today",
@@ -595,7 +607,26 @@ function saveWorkoutLog(log) {
 }
 function saveBodyStat(stat) {
   save();
-  sbUpsert("body_stats", { id:stat.id, date:stat.date, weight:stat.weight, bf:stat.bf, waist:stat.waist, chest:stat.chest, r_arm:stat.r_arm, l_arm:stat.l_arm, r_thigh:stat.r_thigh, l_thigh:stat.l_thigh, hips:stat.hips, sleep:stat.sleep, notes:stat.notes, photo_path:stat.photo_path||null, created_at:clientTs() });
+  var payload = {
+    id:        stat.id,
+    date:      stat.date,
+    weight:    stat.weight||null,
+    bf:        stat.bf||null,
+    waist:     stat.waist||null,
+    chest:     stat.chest||null,
+    r_arm:     stat.r_arm||null,
+    l_arm:     stat.l_arm||null,
+    r_thigh:   stat.r_thigh||null,
+    l_thigh:   stat.l_thigh||null,
+    hips:      stat.hips||null,
+    sleep:     stat.sleep||null,
+    notes:     stat.notes||null,
+    photo_path:stat.photo_path||null,
+    created_at:clientTs()
+  };
+  sbUpsert("body_stats", payload).then(function(ok){
+    if(!ok) console.warn("saveBodyStat failed for id:", stat.id, "photo_path:", stat.photo_path);
+  });
 }
 function saveNutritionLog(entry) {
   save();
@@ -1132,7 +1163,7 @@ function render() {
   // Destroy existing charts before rebuilding DOM
   if(ST.charts) Object.values(ST.charts).forEach(c=>{try{c.destroy();}catch{}});
   ST.charts = {};
-  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}${ST.editingLog?renderEditLogModal():""}`;
+  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}${ST.editingLog?renderEditLogModal():""}${ST.editingCustomFood?renderEditCustomFoodModal():""}`;
   attachAll();
   renderCharts();
 }
@@ -1280,7 +1311,8 @@ function attachSleepSteps() {
 }
 
 function renderDashboard() {
-  const latest=ST.bodyStats[0]||{}, prev=ST.bodyStats[1]||{};
+  const sortedStats = [...ST.bodyStats].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const latest=sortedStats[0]||{}, prev=sortedStats[1]||{};
   const wl=weekLogs(), sum=nutSum(nutByDate(today()));
   const water=todayWater(), filledDrops=Math.round((water/TARGETS.water)*8);
   const wDelta=latest.weight&&prev.weight?(latest.weight-prev.weight).toFixed(1):null;
@@ -1922,6 +1954,25 @@ function buildCSTableHTML() {
     }).join("");
 }
 
+function renderEditCustomFoodModal() {
+  var f = ST.editingCustomFood;
+  if(!f) return "";
+  return `<div class="moverlay" data-action="close-edit-custom"><div class="modal" onclick="event.stopPropagation()">
+    <div class="mhandle"></div>
+    <div class="mtitle">EDIT FOOD</div>
+    <div class="fgrp"><label class="flbl">Name</label><input class="finput" id="ecf-name" value="${f.n||""}" placeholder="Food name"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="fgrp"><label class="flbl">Calories (per 100g)</label><input class="finput" id="ecf-cal" type="number" value="${f.cal||""}" placeholder="kcal"></div>
+      <div class="fgrp"><label class="flbl">Protein (per 100g)</label><input class="finput" id="ecf-p" type="number" value="${f.p||""}" placeholder="g"></div>
+      <div class="fgrp"><label class="flbl">Carbs (per 100g)</label><input class="finput" id="ecf-c" type="number" value="${f.c||""}" placeholder="g"></div>
+      <div class="fgrp"><label class="flbl">Fat (per 100g)</label><input class="finput" id="ecf-f" type="number" value="${f.f||""}" placeholder="g"></div>
+    </div>
+    <div class="fgrp"><label class="flbl">Serving size label</label><input class="finput" id="ecf-label" value="${f.serving_label||""}" placeholder="e.g. 1 cup, 1 sandwich"></div>
+    <div class="fgrp"><label class="flbl">Serving grams</label><input class="finput" id="ecf-grams" type="number" value="${f.serving_grams||100}" placeholder="g"></div>
+    <button class="btn bp bfull blg" data-action="save-edit-custom" style="margin-top:8px">Save Changes</button>
+  </div></div>`;
+}
+
 function renderCheatPanel() {
   const cats = ["All","Protein","Carbs","Fat","Vegetable","Dairy","Condiment","Supplement","Peruvian","Chinese","Mexican","Italian","American","Thai"];
   const myFoodsHTML = ST.customFoods.length > 0 ? `
@@ -1939,6 +1990,7 @@ function renderCheatPanel() {
               </div>
             </div>
             <button class="btn bp" style="font-size:11px;padding:6px 10px" data-prefill='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat||"Custom",serving_label:f.serving_label,serving_grams:f.serving_grams,food_type:f.food_type}).replace(/'/g,"&#39;")}'>+ Log</button>
+            <button data-edit-custom='${JSON.stringify(f).replace(/'/g,"&#39;")}' style="background:none;border:1px solid var(--border);border-radius:var(--rs);color:var(--accent);font-size:11px;font-weight:700;cursor:pointer;padding:6px 10px;font-family:var(--font-b)">✏️</button>
             <button data-del-custom="${f.n}" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:4px">×</button>
           </div>`).join("")}
       </div>
@@ -1973,6 +2025,8 @@ function renderCheatSheet() {
 
 // ── BODY STATS ─────────────────────────────────────
 function buildStatEntryHTML(s, isExpanded, hasPhoto, isUploading) {
+  var photos = getPhotos(s);
+  hasPhoto = photos.length > 0;
   return `
     <div data-exp-stat="${s.id}" style="display:flex;align-items:center;padding:12px 0;cursor:pointer;gap:10px">
       <div style="flex:1">
@@ -1982,8 +2036,8 @@ function buildStatEntryHTML(s, isExpanded, hasPhoto, isUploading) {
           ${s.waist?` · W:${s.waist}"`:""}${s.chest?` · Ch:${s.chest}"`:""}
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        ${hasPhoto?`<div style="width:32px;height:32px;border-radius:6px;overflow:hidden;border:2px solid var(--accent);flex-shrink:0"><img src="${sbPhotoUrl(s.photo_path)}" style="width:100%;height:100%;object-fit:cover"></div>`:""}
+      <div style="display:flex;align-items:center;gap:6px">
+        ${photos.length>0?`<div style="display:flex;gap:3px">${photos.slice(0,3).map(p=>`<div style="width:26px;height:26px;border-radius:4px;overflow:hidden;border:1px solid var(--accent)"><img src="${sbPhotoUrl(p)}" style="width:100%;height:100%;object-fit:cover"></div>`).join("")}${photos.length>3?`<div style="width:26px;height:26px;border-radius:4px;background:var(--bg3);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:var(--muted)">+${photos.length-3}</div>`:""}</div>`:""}
         <div style="color:var(--muted);font-size:18px;transition:transform .2s${isExpanded?";transform:rotate(180deg)":""}">⌄</div>
       </div>
     </div>
@@ -1997,20 +2051,16 @@ function buildStatEntryHTML(s, isExpanded, hasPhoto, isUploading) {
       </div>
       ${s.notes?`<div style="font-size:12px;color:var(--muted);font-style:italic;margin-bottom:12px;padding:8px;background:var(--bg3);border-radius:var(--rs)">"${s.notes}"</div>`:""}
       <div style="margin-bottom:12px">
-        ${hasPhoto?`
-          <div style="position:relative;border-radius:var(--r);overflow:hidden;cursor:pointer;margin-bottom:8px" data-view-photo="${s.photo_path}">
-            <img src="${sbPhotoUrl(s.photo_path)}" style="width:100%;max-height:220px;object-fit:cover;display:block">
-            <div style="position:absolute;bottom:0;left:0;right:0;padding:8px;background:linear-gradient(transparent,rgba(0,0,0,.6));font-size:11px;color:rgba(255,255,255,.8)">Tap to view full size</div>
-          </div>
-          <button style="background:none;border:1px solid var(--border);border-radius:var(--rs);color:var(--muted);font-size:12px;cursor:pointer;padding:6px 12px;font-family:var(--font-b)" data-del-photo="${s.id}">🗑️ Remove Photo</button>
-        `:`
-          <div style="font-size:12px;color:var(--muted);margin-bottom:8px">No progress photo for this entry</div>
-          <div style="display:flex;gap:8px">
-            ${isUploading?`<div style="display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px"><div style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite"></div>Uploading…</div>`:`
-            <label style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:8px 14px;font-size:12px;font-weight:700;color:var(--accent)"><input type="file" accept="image/*" capture data-photo-stat="${s.id}" style="display:none">📷 Camera</label>
-            <label style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:8px 14px;font-size:12px;font-weight:700;color:var(--muted)"><input type="file" accept="image/*" data-photo-stat="${s.id}" style="display:none">🖼 Library</label>`}
-          </div>
-        `}
+        ${photos.length>0?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">${photos.map((p,i)=>`
+          <div style="position:relative;border-radius:var(--rs);overflow:hidden">
+            <div data-view-photo="${p}" style="cursor:pointer"><img src="${sbPhotoUrl(p)}" style="width:100%;height:110px;object-fit:cover;display:block"></div>
+            <button data-del-photo-idx="${i}" data-del-photo-stat="${s.id}" style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.65);border:none;color:white;border-radius:50%;width:22px;height:22px;font-size:13px;cursor:pointer;line-height:1">×</button>
+          </div>`).join("")}</div>`:""}
+        <div style="display:flex;gap:8px">
+          ${isUploading?`<div style="display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px"><div style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite"></div>Uploading…</div>`:`
+          <label style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:7px 12px;font-size:12px;font-weight:700;color:var(--accent)"><input type="file" accept="image/*" capture data-photo-stat="${s.id}" style="display:none">📷 ${photos.length>0?"+ Photo":"Camera"}</label>
+          <label style="cursor:pointer;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:7px 12px;font-size:12px;font-weight:700;color:var(--muted)"><input type="file" accept="image/*" data-photo-stat="${s.id}" style="display:none">🖼 ${photos.length>0?"+ Library":"Library"}</label>`}
+        </div>
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn bp" style="flex:1;font-size:13px" data-edit-stat="${s.id}">✏️ Edit Stats</button>
@@ -2024,7 +2074,7 @@ function attachStatEntryListeners(container, id) {
   var expEl = container.querySelector("[data-exp-stat]");
   if(expEl) expEl.addEventListener("click", function(e){
     // Ignore clicks on action buttons inside the expanded panel
-    if(e.target.closest("[data-edit-stat],[data-del-stat],[data-del-photo],[data-view-photo],[data-photo-stat],label,button")) return;
+    if(e.target.closest("[data-edit-stat],[data-del-stat],[data-del-photo-idx],[data-view-photo],[data-photo-stat],label,button")) return;
     e.stopPropagation();
     ST.expandedStat = (ST.expandedStat===id) ? null : id;
     var s = ST.bodyStats.find(function(x){return x.id===id;});
@@ -2040,38 +2090,48 @@ function attachStatEntryListeners(container, id) {
     ST.viewingPhoto = vpEl.dataset.viewPhoto;
     render();
   });
-  // Photo upload
+  // Photo upload — appends to photos array
   container.querySelectorAll("[data-photo-stat]").forEach(function(el){
     el.addEventListener("change", function(){
       var file = el.files[0]; if(!file) return;
       var statId = el.dataset.photoStat;
       ST.photoUploading = statId;
-      container.innerHTML = buildStatEntryHTML(ST.bodyStats.find(function(x){return x.id===statId;})||{id:statId}, true, false, true);
+      var stat0 = ST.bodyStats.find(function(x){return x.id===statId;});
+      container.innerHTML = buildStatEntryHTML(stat0||{id:statId}, true, false, true);
       attachStatEntryListeners(container, statId);
       sbUploadPhoto(statId, file).then(function(path){
         if(path){
           var stat = ST.bodyStats.find(function(x){return x.id===statId;});
-          if(stat){ stat.photo_path=path; saveBodyStat(stat); }
+          if(stat){
+            var photos = getPhotos(stat);
+            photos.push(path);
+            setPhotos(stat, photos);
+            saveBodyStat(stat);
+          }
         }
-        ST.photoUploading=null;
-        var s2=ST.bodyStats.find(function(x){return x.id===statId;});
-        if(s2){ container.innerHTML=buildStatEntryHTML(s2,true,!!s2.photo_path,false); attachStatEntryListeners(container,statId); }
+        ST.photoUploading = null;
+        var s2 = ST.bodyStats.find(function(x){return x.id===statId;});
+        if(s2){ container.innerHTML=buildStatEntryHTML(s2,true,getPhotos(s2).length>0,false); attachStatEntryListeners(container,statId); }
       });
     });
   });
-  // Delete photo
-  var dpEl = container.querySelector("[data-del-photo]");
-  if(dpEl) dpEl.addEventListener("click", function(e){
-    e.stopPropagation();
-    var statId = dpEl.dataset.delPhoto;
-    var stat = ST.bodyStats.find(function(x){return x.id===statId;});
-    if(stat && stat.photo_path){
-      sbDeletePhoto(stat.photo_path);
-      stat.photo_path=null;
+
+  // Delete individual photo by index
+  container.querySelectorAll("[data-del-photo-idx]").forEach(function(btn){
+    btn.addEventListener("click", function(e){
+      e.stopPropagation();
+      var idx = parseInt(btn.dataset.delPhotoIdx);
+      var statId = btn.dataset.delPhotoStat;
+      var stat = ST.bodyStats.find(function(x){return x.id===statId;});
+      if(!stat) return;
+      var photos = getPhotos(stat);
+      var removed = photos.splice(idx, 1);
+      if(removed[0]) sbDeletePhoto(removed[0]);
+      setPhotos(stat, photos);
       saveBodyStat(stat);
-      container.innerHTML=buildStatEntryHTML(stat,true,false,false);
-      attachStatEntryListeners(container,statId);
-    }
+      container.innerHTML = buildStatEntryHTML(stat, true, photos.length>0, false);
+      attachStatEntryListeners(container, statId);
+    });
   });
   // Edit stat
   var editEl = container.querySelector("[data-edit-stat]");
@@ -2156,7 +2216,7 @@ function renderBody() {
   <div class="card"><div class="ct">History</div>
     ${ST.bodyStats.length===0?'<div class="empty"><div class="empty-icon">📊</div><div>No stats yet.</div></div>':
       ST.bodyStats.map(s=>{
-        const hasPhoto=!!s.photo_path;
+        const hasPhoto=getPhotos(s).length>0;
         const isExpanded=ST.expandedStat===s.id;
         const isUploading=ST.photoUploading===s.id;
         return `<div data-stat-container="${s.id}" style="border-bottom:1px solid var(--border)">${buildStatEntryHTML(s,isExpanded,hasPhoto,isUploading)}</div>`;
@@ -2883,6 +2943,36 @@ function attachAll() {
   $("[data-action='open-cheat']")?.addEventListener("click",()=>{ST.showCheatPanel=true;render();});
   $("[data-action='close-cheat']")?.addEventListener("click",()=>{ST.showCheatPanel=false;render();});
   // Delete custom food
+  // EDIT CUSTOM FOOD
+  $$("[data-edit-custom]").forEach(el=>el.addEventListener("click",e=>{
+    e.stopPropagation();
+    try { ST.editingCustomFood=JSON.parse(el.dataset.editCustom.replace(/&#39;/g,"'")); } catch{}
+    render();
+  }));
+  $("[data-action='close-edit-custom']")?.addEventListener("click",()=>{ST.editingCustomFood=null;render();});
+  $("[data-action='save-edit-custom']")?.addEventListener("click",()=>{
+    var f=ST.editingCustomFood; if(!f) return;
+    var oldName=f.n;
+    var updated={
+      id:   f.id||oldName.replace(/\s+/g,"_").toLowerCase(),
+      n:    document.getElementById("ecf-name")?.value.trim()||f.n,
+      cal:  parseFloat(document.getElementById("ecf-cal")?.value)||f.cal,
+      p:    parseFloat(document.getElementById("ecf-p")?.value)||f.p,
+      c:    parseFloat(document.getElementById("ecf-c")?.value)||f.c,
+      f:    parseFloat(document.getElementById("ecf-f")?.value)||f.f,
+      cat:  f.cat||"Custom",
+      serving_label: document.getElementById("ecf-label")?.value||f.serving_label,
+      serving_grams: parseFloat(document.getElementById("ecf-grams")?.value)||f.serving_grams||100,
+      food_type: f.food_type||"A",
+      source: f.source||"manual"
+    };
+    var idx=ST.customFoods.findIndex(function(x){return x.n===oldName||x.id===f.id;});
+    if(idx>=0) ST.customFoods[idx]=updated;
+    else ST.customFoods.unshift(updated);
+    save(); saveCustomFoodToCloud(updated);
+    ST.editingCustomFood=null; render();
+  });
+
   $$("[data-del-custom]").forEach(el=>el.addEventListener("click",e=>{
     e.stopPropagation();
     var name = el.dataset.delCustom;
