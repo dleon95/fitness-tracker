@@ -650,7 +650,11 @@ function syncToCloud(t, r)          { sbUpsert(t, r); }
 // UTILS
 // ══════════════════════════════════════════════════
 function fmtDate(iso) { return new Date(iso+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}); }
-function today()      { return new Date().toISOString().split("T")[0]; }
+function today() {
+  var d = new Date();
+  var pad = function(n){ return String(n).padStart(2,"0"); };
+  return d.getFullYear() + "-" + pad(d.getMonth()+1) + "-" + pad(d.getDate());
+}
 function getToday()   { return new Date().toLocaleDateString("en-US",{weekday:"short"}).toUpperCase().slice(0,3); }
 function weekMon()    { var d=new Date(); d.setDate(d.getDate()-((d.getDay()+6)%7)); d.setHours(0,0,0,0); return d; }
 function weekLogs()   { var m=weekMon(); return ST.workoutLogs.filter(function(l){return new Date(l.date+"T12:00:00")>=m;}); }
