@@ -523,6 +523,22 @@ const QUICK_SERVINGS = {
   "Oats (dry/raw)":     [{label:"¼ cup",  g:20}, {label:"⅓ cup",   g:27}, {label:"½ cup",  g:40}],
   "Oats (cooked)":      [{label:"½ cup",  g:117},{label:"1 cup",   g:234}],
   "Whey protein":       [{label:"½ scoop",g:15}, {label:"1 scoop", g:30}, {label:"1.5 scoops",g:45}],
+
+  // Liquids — in ml (1ml ≈ 1g for most liquids)
+  "Whole milk":         [{label:"½ cup",g:120},{label:"1 cup",g:240},{label:"1 glass",g:300},{label:"8 fl oz",g:240}],
+  "2% milk":            [{label:"½ cup",g:120},{label:"1 cup",g:240},{label:"1 glass",g:300},{label:"8 fl oz",g:240}],
+  "Skim milk":          [{label:"½ cup",g:120},{label:"1 cup",g:240},{label:"1 glass",g:300},{label:"8 fl oz",g:240}],
+  "Almond milk":        [{label:"½ cup",g:120},{label:"1 cup",g:240},{label:"1 glass",g:300}],
+  "Oat milk":           [{label:"½ cup",g:120},{label:"1 cup",g:240},{label:"1 glass",g:300}],
+  "Orange juice":       [{label:"½ cup",g:120},{label:"1 cup",g:240},{label:"1 glass",g:300},{label:"8 fl oz",g:240}],
+  "Apple juice":        [{label:"½ cup",g:120},{label:"1 cup",g:240},{label:"1 glass",g:300}],
+  "Protein shake":      [{label:"1 cup",g:240},{label:"1.5 cups",g:360},{label:"2 cups",g:480}],
+  "Coffee (black)":     [{label:"1 shot espresso",g:30},{label:"8 fl oz",g:240},{label:"12 fl oz",g:360}],
+  "Coffee with milk":   [{label:"Small",g:240},{label:"Medium",g:360},{label:"Large",g:480}],
+  "Greek yogurt drink": [{label:"1 bottle",g:200},{label:"1.5 bottles",g:300}],
+  "Coconut water":      [{label:"½ cup",g:120},{label:"1 cup",g:240},{label:"11 fl oz can",g:330}],
+  "Sports drink":       [{label:"8 fl oz",g:240},{label:"12 fl oz",g:360},{label:"20 fl oz",g:591}],
+  "Smoothie":           [{label:"1 cup",g:240},{label:"1.5 cups",g:360},{label:"2 cups",g:480}],
 };
 
 function getQuickServings(foodName) {
@@ -550,12 +566,13 @@ const ST = {
   dailyLogs:     S.get("dl", []),  // sleep + steps per day
   weekDay: null,
   selectedMeasurement: "waist",
-  chartRangeWB: 28,    // weight/BF chart range in days
-  chartRangeMeas: 28,  // measurements chart range in days
+  chartRangeWB: 28,
+  chartRangeMeas: 28,
   charts: {},
+  workoutView: "plan",
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {},
   restTimer: null,
-  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null,
+  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]},
   expandedLog: null,
   foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""}, photoLookingUp: false,
   nutTab: "today",
@@ -717,22 +734,25 @@ async function lookupFoodWithClaude(query) {
 
 Determine what TYPE of food this is and respond accordingly:
 
-TYPE A — Raw ingredient (chicken breast, rice, oats, olive oil, etc.):
+TYPE A — Raw solid ingredient (chicken breast, rice, oats, etc.):
 Return macros per 100g. Set serving_label to "per 100g" and serving_grams to 100.
 
-TYPE B — Restaurant/fast food item (Big Mac, Wendy's sandwich, Chipotle burrito, etc.):
-Return macros for the WHOLE item as typically served. Set serving_label to the item description (e.g. "1 sandwich", "1 burger") and serving_grams to the approximate weight of that item in grams.
+TYPE B — Restaurant/fast food item (Big Mac, Wendy's sandwich, etc.):
+Return macros for the WHOLE item. Set serving_label (e.g. "1 sandwich") and serving_grams to approximate weight in grams.
 
-TYPE C — Recipe/dish (lomo saltado, pad thai, chicken tikka masala, etc.):
-Return macros for a typical restaurant/home serving portion. Set serving_label (e.g. "1 serving ~350g") and serving_grams to the typical serving weight.
+TYPE C — Recipe/dish (lomo saltado, pad thai, etc.):
+Return macros for a typical serving. Set serving_label (e.g. "1 serving ~350g") and serving_grams to typical weight.
 
 TYPE D — Combo meal (Wendy's combo, McDonald's meal, etc.):
-Return macros for the full combo as typically ordered. Set serving_label (e.g. "full combo meal") and serving_grams to approximate total weight.
+Return macros for the full combo. Set serving_label and serving_grams to approximate total weight.
+
+TYPE E — Liquid/beverage (milk, juice, coffee, smoothie, protein shake, sports drink, etc.):
+Return macros per 100ml. Set serving_label to "per 100ml" and serving_grams to 100. Note: for liquids, serving_grams represents ml.
 
 Respond with ONLY a JSON object, no other text:
-{"name":"exact food name","cal":000,"p":00.0,"c":00.0,"f":00.0,"serving_label":"description","serving_grams":000,"type":"A|B|C|D"}
+{"name":"exact food name","cal":000,"p":00.0,"c":00.0,"f":00.0,"serving_label":"description","serving_grams":000,"type":"A|B|C|D|E"}
 
-Use real nutritional data. For restaurant items use the actual menu item nutrition if known.`
+Use real nutritional data. For restaurant items use actual menu nutrition if known.`
         }]
       })
     });
@@ -1170,7 +1190,7 @@ function render() {
   // Destroy existing charts before rebuilding DOM
   if(ST.charts) Object.values(ST.charts).forEach(c=>{try{c.destroy();}catch{}});
   ST.charts = {};
-  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}${ST.editingLog?renderEditLogModal():""}${ST.editingCustomFood?renderEditCustomFoodModal():""}`;
+  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}${ST.editingLog?renderEditLogModal():""}${ST.editingCustomFood?renderEditCustomFoodModal():""}${ST.tempoPopup?renderTempoPopup():""}${ST.showMealBuilder?renderMealBuilder():""}`;
   attachAll();
   renderCharts();
 }
@@ -1229,12 +1249,46 @@ function updateMacroPreview() {
 // NAV + TIMER
 // ══════════════════════════════════════════════════
 function renderNav() {
-  const tabs = [{id:"dashboard",icon:"⚡",label:"Home"},{id:"workout",icon:"🏋️",label:"Workout"},{id:"history",icon:"📅",label:"Log"},{id:"nutrition",icon:"🥗",label:"Food"},{id:"body",icon:"📊",label:"Body"},{id:"coach",icon:"🤖",label:"Coach"}];
+  const tabs = [{id:"dashboard",icon:"⚡",label:"Home"},{id:"workout",icon:"🏋️",label:"Workout"},{id:"nutrition",icon:"🥗",label:"Food"},{id:"body",icon:"📊",label:"Body"},{id:"coach",icon:"🤖",label:"Coach"}];
   return `<nav class="bnav">${tabs.map(t=>`<button class="nb${ST.tab===t.id?" active":""}" data-nav="${t.id}"><span class="ni">${t.icon}</span><span class="nl">${t.label}</span></button>`).join("")}</nav>`;
 }
 function renderTimer() {
   const {secs,total}=ST.restTimer, m=Math.floor(secs/60), s=secs%60;
   return `<div class="rtimer"><div><div class="rt-label">Rest Timer</div><div class="rt-count" id="rtc">${m}:${s.toString().padStart(2,"0")}</div></div><div style="flex:1"></div><button class="rt-close" data-action="stop-timer">✕</button><div class="rt-bar" id="rtb" style="width:${(secs/total)*100}%"></div></div>`;
+}
+
+function renderTempoPopup() {
+  var t = ST.tempoPopup || "";
+  var parts = t.split("-");
+  var ecc = parts[0]||"?", pause = parts[1]||"?", con = parts[2]||"?";
+  var explainNum = function(n, phase) {
+    if(n==="X"||n==="x") return "Explosive — as fast as possible";
+    if(n==="—"||n==="-") return "Not applicable";
+    return n + " second" + (n==="1"?"":"s");
+  };
+  return `<div class="moverlay" onclick="ST.tempoPopup=null;render()"><div class="modal" onclick="event.stopPropagation()" style="max-height:auto">
+    <div class="mhandle"></div>
+    <div style="font-family:var(--font-d);font-size:28px;letter-spacing:2px;text-align:center;margin-bottom:4px">${t}</div>
+    <div style="font-size:12px;color:var(--muted);text-align:center;margin-bottom:20px">Tempo = Eccentric · Pause · Concentric</div>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:20px">
+      <div style="background:var(--bg3);border-radius:var(--r);padding:14px;display:flex;align-items:center;gap:14px">
+        <div style="font-family:var(--font-d);font-size:32px;color:#ef4444;width:40px;text-align:center">${ecc}</div>
+        <div><div style="font-weight:700;font-size:14px">Eccentric (Lowering)</div><div style="font-size:12px;color:var(--muted);margin-top:3px">${explainNum(ecc,"ecc")} — the lowering/stretching phase<br><span style="font-style:italic">e.g. lowering the bar on bench press</span></div></div>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:14px;display:flex;align-items:center;gap:14px">
+        <div style="font-family:var(--font-d);font-size:32px;color:#eab308;width:40px;text-align:center">${pause}</div>
+        <div><div style="font-weight:700;font-size:14px">Pause (Bottom)</div><div style="font-size:12px;color:var(--muted);margin-top:3px">${explainNum(pause,"pause")} — hold at the bottom<br><span style="font-style:italic">e.g. pause at chest on bench press</span></div></div>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--r);padding:14px;display:flex;align-items:center;gap:14px">
+        <div style="font-family:var(--font-d);font-size:32px;color:#22c55e;width:40px;text-align:center">${con}</div>
+        <div><div style="font-weight:700;font-size:14px">Concentric (Lifting)</div><div style="font-size:12px;color:var(--muted);margin-top:3px">${con==="X"||con==="x"?"Explosive — press as fast as you can":explainNum(con,"con")+" — the lifting/pressing phase"}<br><span style="font-style:italic">e.g. pressing the bar up on bench press</span></div></div>
+      </div>
+    </div>
+    <div style="background:rgba(79,142,247,.08);border-radius:var(--rs);padding:12px;font-size:12px;color:var(--muted);line-height:1.6">
+      💡 <strong>Why it matters:</strong> Slow eccentrics (3-4 sec) create more muscle damage and growth stimulus. Explosive concentrics maximize power output. Pauses eliminate momentum and increase time under tension.
+    </div>
+    <button class="btn bp bfull" style="margin-top:16px" onclick="ST.tempoPopup=null;render()">Got it</button>
+  </div></div>`;
 }
 
 // ══════════════════════════════════════════════════
@@ -1243,12 +1297,11 @@ function renderTimer() {
 function renderPage() {
   switch(ST.tab) {
     case "dashboard":  return renderDashboard();
-    case "workout":    return ST.activeDay ? renderWorkoutSession() : renderDayPicker();
+    case "workout":    return ST.workoutView==="log"||ST.workoutView==="prs" ? renderHistory() : (ST.activeDay ? renderWorkoutSession() : renderDayPicker());
     case "nutrition":  return renderNutrition();
     case "cheatsheet": return renderCheatSheet();
     case "body":       return renderBody();
     case "coach":      return renderCoach();
-    case "history":    return renderHistory();
     default:           return renderDashboard();
   }
 }
@@ -1519,7 +1572,15 @@ function renderDashboard() {
 // ── WORKOUT DAY PICKER ─────────────────────────────
 function renderDayPicker() {
   const td = getToday();
-  return `<div class="ph"><div class="pt">WORKOUT</div><div class="ps">Choose today's session</div></div><div style="height:12px"></div>
+  return `
+  <div class="ph" style="display:flex;align-items:flex-end;justify-content:space-between">
+    <div><div class="pt">WORKOUT</div><div class="ps">Choose today's session</div></div>
+    <div style="display:flex;gap:6px;margin-bottom:14px">
+      <button data-wview="log" title="Workout Log" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:8px 12px;font-size:16px;cursor:pointer;color:var(--muted)">📅</button>
+      <button data-wview="prs" title="Personal Records" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:8px 12px;font-size:16px;cursor:pointer;color:var(--muted)">🏆</button>
+    </div>
+  </div>
+  <div style="height:4px"></div>
   ${DAY_ORDER.map(d=>{const plan=PLAN[d],last=ST.workoutLogs.find(l=>l.dayId===d),isToday=td===d;return`<div class="daycard" style="${isToday?`border-color:${plan.color}`:""}" data-start-day="${d}"><div class="dc-hdr"><div class="dc-dot" style="background:${plan.color}"></div><div><div class="dc-title" style="${isToday?`color:${plan.color}`:""}">${plan.emoji} ${plan.label} — ${plan.title}</div><div class="dc-meta">${plan.duration} · ${plan.exercises.length} exercises</div></div>${isToday?`<span class="pill pill-a">TODAY</span>`:""}</div><div class="dc-muscles">${plan.muscles}</div><div class="dc-foot"><span style="font-size:12px;color:var(--muted)">${last?`Last: ${fmtDate(last.date)}`:"Never logged"}</span><button class="btn bg" style="padding:7px 16px;font-size:13px">Start →</button></div></div>`;}).join("")}
   <div style="height:20px"></div>`;
 }
@@ -1569,7 +1630,7 @@ function renderExBlock(ex, idx) {
           <div class="exname">${ex.name}</div>
           <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;background:${priorityStyle.bg};color:${priorityStyle.color}">${priorityStyle.label}</span>
         </div>
-        <div class="exspec">${ex.sets}×${ex.reps} · ${ex.tempo} · Rest ${ex.rest}${doneCount>0?` · <span style="color:var(--green)">${doneCount}/${sets.length} ✓</span>`:""}</div>
+        <div class="exspec">${ex.sets}×${ex.reps} · <span data-tempo="${ex.tempo}" style="text-decoration:underline;text-decoration-style:dotted;cursor:pointer;color:var(--accent)">${ex.tempo}</span> · Rest ${ex.rest}${doneCount>0?` · <span style="color:var(--green)">${doneCount}/${sets.length} ✓</span>`:""}</div>
         <div style="font-size:11px;font-weight:700;color:var(--muted2);margin-top:3px">🎯 ${ex.muscles}</div>
         ${last?`<div style="font-size:11px;color:var(--muted);margin-top:2px">
           Last: <strong style="color:var(--text)">${last.maxWeight}lbs × ${last.maxReps} reps</strong> (${fmtDate(last.date)})
@@ -1798,6 +1859,31 @@ function renderNutWeek() {
       </div>
       <button class="btn bp" style="font-size:12px;padding:8px 14px" data-action="open-food-for-day" data-date="${selectedDay}">+ Add</button>
     </div>
+    <!-- Water & Steps for selected day -->
+    ${(()=>{
+      const dayLog = ST.dailyLogs.find(function(l){return l.date===selectedDay;})||{steps:0,sleep_hours:0};
+      const w = selWater ? selWater.liters : 0;
+      return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <div style="background:var(--bg3);border-radius:var(--rs);padding:10px">
+          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">💧 Water</div>
+          <div style="font-family:var(--font-d);font-size:22px;color:#06b6d4;margin-bottom:6px">${w.toFixed(1)}L</div>
+          <div style="display:flex;gap:4px">
+            <button class="btn bg" style="flex:1;padding:4px;font-size:11px" data-day-water="-0.25" data-day="${selectedDay}">-¼</button>
+            <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-water="0.25" data-day="${selectedDay}">+¼</button>
+            <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-water="0.5" data-day="${selectedDay}">+½</button>
+          </div>
+        </div>
+        <div style="background:var(--bg3);border-radius:var(--rs);padding:10px">
+          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">👟 Steps</div>
+          <div style="font-family:var(--font-d);font-size:22px;color:#22c55e;margin-bottom:6px">${(dayLog.steps||0).toLocaleString()}</div>
+          <div style="display:flex;gap:4px">
+            <button class="btn bg" style="flex:1;padding:4px;font-size:11px" data-day-steps="-250" data-day="${selectedDay}">-250</button>
+            <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-steps="250" data-day="${selectedDay}">+250</button>
+            <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-steps="500" data-day="${selectedDay}">+500</button>
+          </div>
+        </div>
+      </div>`;
+    })()}
     <!-- Macro bars for selected day -->
     ${[
       {label:"Calories",val:selSum.cal,target:TARGETS.cal,color:"#f97316",unit:"kcal"},
@@ -1835,9 +1921,42 @@ function renderFoodModal() {
     previewHTML = `<div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--green);margin-bottom:8px">Calculated for ${ST.foodEntry.grams}g</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;text-align:center"><div><div style="font-family:var(--font-d);font-size:22px;color:#f97316">${m.cal}</div><div style="font-size:10px;color:var(--muted)">kcal</div></div><div><div style="font-family:var(--font-d);font-size:22px;color:#22c55e">${m.p}</div><div style="font-size:10px;color:var(--muted)">protein</div></div><div><div style="font-family:var(--font-d);font-size:22px;color:#4f8ef7">${m.c}</div><div style="font-size:10px;color:var(--muted)">carbs</div></div><div><div style="font-family:var(--font-d);font-size:22px;color:#eab308">${m.f}</div><div style="font-size:10px;color:var(--muted)">fat</div></div></div>`;
   }
   return `<div class="moverlay" data-action="close-food"><div class="modal" onclick="event.stopPropagation()">
-    <div class="mhandle"></div><div class="mtitle">${ST.editingFood ? "EDIT FOOD" : "LOG FOOD"}</div>
+    <div class="mhandle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div class="mtitle" style="margin-bottom:0">${ST.editingFood ? "EDIT FOOD" : "LOG FOOD"}</div>
+      ${!ST.editingFood?`<button data-action="open-meal-builder" style="background:rgba(79,142,247,.12);border:1px solid rgba(79,142,247,.3);color:var(--accent);border-radius:var(--rs);padding:6px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-b)">🍽 Create Meal</button>`:""}
+    </div>
     ${buildFoodModalInner()}
   </div></div>`;
+}
+
+function buildBelowSearch() {
+  if(ST.foodLookingUp) {
+    return `<div style="display:flex;align-items:center;gap:10px;padding:12px;background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);border-radius:var(--rs);margin-top:4px"><div style="width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--purple);border-radius:50%;animation:spin 1s linear infinite;flex-shrink:0"></div><div style="font-size:13px;color:var(--purple)">Looking up macros…</div></div>`;
+  }
+  if(ST.foodResults.length > 0) {
+    return `<div class="fsr" id="food-results-list">${ST.foodResults.map(f=>`<div class="fsr-item" data-sel-food='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat||"",serving_label:f.serving_label||"per 100g",serving_grams:f.serving_grams||100,food_type:f.food_type||"A"}).replace(/'/g,"&#39;")}'>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+        <div class="fsr-name">${f.n}</div>
+        ${f.cat==="Claude Lookup"?`<span style="font-size:10px;background:rgba(168,85,247,.15);color:var(--purple);padding:2px 6px;border-radius:99px;font-weight:700">🤖 AI</span>`:""}
+        ${f.cat==="Photo Lookup"?`<span style="font-size:10px;background:rgba(79,142,247,.15);color:var(--accent);padding:2px 6px;border-radius:99px;font-weight:700">📷 Photo</span>`:""}
+      </div>
+      <div class="fsr-macros">
+        ${f.cat==="Claude Lookup" && f.food_type!=="A"
+          ? `${f.serving_label}: ${Math.round(f.cal*(f.serving_grams||100)/100)} kcal · P:${Math.round(f.p*(f.serving_grams||100)/100*10)/10}g C:${Math.round(f.c*(f.serving_grams||100)/100*10)/10}g F:${Math.round(f.f*(f.serving_grams||100)/100*10)/10}g`
+          : f.food_type==="E"
+          ? `${f.cal} kcal · P:${ri(f.p)}g C:${ri(f.c)}g F:${ri(f.f)}g per 100ml`
+          : `${f.cal} kcal · P:${ri(f.p)}g C:${ri(f.c)}g F:${ri(f.f)}g per 100g`}
+      </div>
+    </div>`).join("")}</div>`;
+  }
+  if(ST.foodSearch && ST.foodSearch.length >= 2) {
+    return `<div style="padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);margin-top:4px">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:8px">Not in database — ask Claude to look it up?</div>
+      <button id="ask-claude-btn" class="btn bpur bfull" style="font-size:13px;padding:10px">🤖 Ask Claude</button>
+    </div>`;
+  }
+  return "";
 }
 
 function buildFoodModalInner() {
@@ -1851,28 +1970,7 @@ function buildFoodModalInner() {
 
   // Determine what to show below search box
   var belowSearch = "";
-  if(ST.foodLookingUp) {
-    belowSearch = `<div style="display:flex;align-items:center;gap:10px;padding:12px;background:rgba(168,85,247,.08);border:1px solid rgba(168,85,247,.3);border-radius:var(--rs);margin-top:4px"><div style="width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--purple);border-radius:50%;animation:spin 1s linear infinite;flex-shrink:0"></div><div style="font-size:13px;color:var(--purple)">Looking up macros…</div></div>`;
-  } else if(ST.foodResults.length > 0) {
-    belowSearch = `<div class="fsr">${ST.foodResults.map(f=>`<div class="fsr-item" data-sel-food='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat||"",serving_label:f.serving_label||"per 100g",serving_grams:f.serving_grams||100,food_type:f.food_type||"A"}).replace(/'/g,"&#39;")}'>
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
-        <div class="fsr-name">${f.n}</div>
-        ${f.cat==="Claude Lookup"?`<span style="font-size:10px;background:rgba(168,85,247,.15);color:var(--purple);padding:2px 6px;border-radius:99px;font-weight:700">🤖 AI</span>`:""}
-        ${f.cat==="Photo Lookup"?`<span style="font-size:10px;background:rgba(79,142,247,.15);color:var(--accent);padding:2px 6px;border-radius:99px;font-weight:700">📷 Photo</span>`:""}
-      </div>
-      <div class="fsr-macros">
-        ${f.cat==="Claude Lookup" && f.food_type!=="A"
-          ? `${f.serving_label}: ${Math.round(f.cal*(f.serving_grams||100)/100)} kcal · P:${Math.round(f.p*(f.serving_grams||100)/100*10)/10}g C:${Math.round(f.c*(f.serving_grams||100)/100*10)/10}g F:${Math.round(f.f*(f.serving_grams||100)/100*10)/10}g`
-          : `${f.cal} kcal · P:${ri(f.p)}g C:${ri(f.c)}g F:${ri(f.f)}g per 100g`
-        }
-      </div>
-    </div>`).join("")}</div>`;
-  } else if(ST.foodSearch && ST.foodSearch.length >= 2) {
-    belowSearch = `<div style="padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);margin-top:4px">
-      <div style="font-size:13px;color:var(--muted);margin-bottom:8px">Not in database — ask Claude to look it up?</div>
-      <button id="ask-claude-btn" class="btn bpur bfull" style="font-size:13px;padding:10px">🤖 Ask Claude</button>
-    </div>`;
-  }
+  var belowSearch = buildBelowSearch();
 
   return `
     ${ST.photoLookingUp ? `
@@ -1894,7 +1992,7 @@ function buildFoodModalInner() {
     <div class="fgrp">
       <label class="flbl">Search Food</label>
       <input class="finput" type="text" id="food-search-input" placeholder="e.g. chicken breast, ceviche, pad thai…" value="${ST.foodSearch}" autocomplete="off">
-      ${belowSearch}
+      <div id="food-below-search">${belowSearch}</div>
     </div>
     ${hasFood?`
     <div style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:12px;margin-bottom:14px">
@@ -1907,21 +2005,27 @@ function buildFoodModalInner() {
       </div>
     </div>
     <div class="fgrp">
-      <label class="flbl">${ST.foodEntry.food.cat==="Claude Lookup" && ST.foodEntry.food.food_type!=="A" ? `Amount (grams) — typical serving: ${ST.foodEntry.food.serving_grams}g` : "Amount (grams)"}</label>
       ${(()=>{
-        var qs = getQuickServings(ST.foodEntry.food.n);
-        if(!qs) return "";
-        return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
+        var isLiquid = ST.foodEntry.food && (
+          ST.foodEntry.food.food_type === "E" ||
+          ["milk","juice","shake","smoothie","drink","coffee","water","coconut","latte","cappuccino","espresso"].some(function(w){ return ST.foodEntry.food.n.toLowerCase().includes(w); })
+        );
+        var isClaudeServing = ST.foodEntry.food && ST.foodEntry.food.cat==="Claude Lookup" && ST.foodEntry.food.food_type!=="A";
+        var lbl = isClaudeServing ? `Amount (grams) — typical serving: ${ST.foodEntry.food.serving_grams}g` : isLiquid ? "Amount (ml) — 1ml ≈ 1g for liquids" : "Amount (grams)";
+        var placeholder = ST.foodEntry.food && ST.foodEntry.food.serving_grams ? String(ST.foodEntry.food.serving_grams) : isLiquid ? "240" : "150";
+        var qs = getQuickServings(ST.foodEntry.food ? ST.foodEntry.food.n : "");
+        return `<label class="flbl">${lbl}</label>
+        ${qs ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px">
           ${qs.map(function(s){
             var m = calcMacros(ST.foodEntry.food, s.g);
             var active = String(ST.foodEntry.grams) === String(s.g);
             return `<button class="quick-serving-btn" data-qg="${s.g}" style="padding:6px 12px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${active?"var(--accent)":"var(--border)"};background:${active?"rgba(79,142,247,.15)":"var(--bg3)"};color:${active?"var(--accent)":"var(--muted)"}">
-              ${s.label} <span style="font-weight:400;color:var(--muted)">(${s.g}g · ${m.cal}kcal)</span>
+              ${s.label} <span style="font-weight:400;color:var(--muted)">(${s.g}${isLiquid?"ml":"g"} · ${m.cal}kcal)</span>
             </button>`;
           }).join("")}
-        </div>`;
+        </div>` : ""}
+        <input class="finput" type="number" inputmode="decimal" id="food-grams-input" placeholder="${placeholder}" value="${ST.foodEntry.grams}" autocomplete="off">`;
       })()}
-      <input class="finput" type="number" inputmode="decimal" id="food-grams-input" placeholder="${ST.foodEntry.food.serving_grams||150}" value="${ST.foodEntry.grams}" autocomplete="off">
     </div>
     <div id="macro-preview" style="background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);border-radius:var(--rs);padding:12px;margin-bottom:14px;${hasGrams?"":"display:none"}">${previewHTML}</div>
     <button id="save-food-btn" class="btn bp bfull blg" style="${hasGrams?"":"display:none"}">${ST.editingFood?"Update Entry":"Add to Log"}</button>
@@ -1959,6 +2063,78 @@ function buildCSTableHTML() {
         <button class="btn bp" style="margin-top:10px;font-size:12px;padding:8px 16px" data-prefill='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat}).replace(/'/g,"&#39;")}'>+ Log This Food →</button>
       </div>`:""}`;
     }).join("");
+}
+
+function renderMealBuilder() {
+  var mb = ST.mealBuilder;
+  // Calculate total macros
+  var total = mb.ingredients.reduce(function(t, ing) {
+    var m = calcMacros(ing.food, ing.grams);
+    return {cal: t.cal+m.cal, p: t.p+m.p, c: t.c+m.c, f: t.f+m.f};
+  }, {cal:0,p:0,c:0,f:0});
+  var totalGrams = mb.ingredients.reduce(function(t, ing){ return t + parseFloat(ing.grams||0); }, 0);
+
+  // Search results
+  var searchResults = mb.search && mb.search.length >= 1 ? searchFoods(mb.search) : [];
+
+  return `<div class="moverlay" data-action="close-meal-builder"><div class="modal" onclick="event.stopPropagation()" style="max-height:92dvh">
+    <div class="mhandle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="mtitle">CREATE MEAL</div>
+      <button id="close-meal-btn" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:4px">✕</button>
+    </div>
+
+    <!-- Meal name -->
+    <div class="fgrp" style="margin-bottom:12px">
+      <label class="flbl">Meal Name</label>
+      <input class="finput" id="meal-name-input" placeholder="e.g. Mozzarella Cheese Quesadilla" value="${mb.name}" autocomplete="off">
+    </div>
+
+    <!-- Ingredient search -->
+    <div class="fgrp" style="margin-bottom:8px">
+      <label class="flbl">Add Ingredient</label>
+      <input class="finput" id="meal-search-input" placeholder="Search food…" value="${mb.search}" autocomplete="off">
+      ${searchResults.length > 0 ? `<div class="fsr" style="margin-top:4px">${searchResults.map(f=>`
+        <div class="meal-add-item" data-meal-food='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat||""}).replace(/'/g,"&#39;")}' style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border)">
+          <div class="fsr-name">${f.n}</div>
+          <div class="fsr-macros">${f.cal} kcal · P:${ri(f.p)}g C:${ri(f.c)}g F:${ri(f.f)}g per 100g</div>
+        </div>`).join("")}</div>` : ""}
+    </div>
+
+    <!-- Ingredients list -->
+    ${mb.ingredients.length > 0 ? `
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Ingredients</div>
+      ${mb.ingredients.map((ing, i) => {
+        var m = calcMacros(ing.food, ing.grams);
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;background:var(--bg3);border-radius:var(--rs);padding:8px 10px">
+          <div style="flex:1">
+            <div style="font-weight:600;font-size:13px">${ing.food.n}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">${m.cal} kcal · P:${ri(m.p)}g C:${ri(m.c)}g F:${ri(m.f)}g</div>
+          </div>
+          <input type="number" inputmode="decimal" data-ing-grams="${i}" value="${ing.grams}" style="width:60px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:5px;color:var(--text);font-size:13px;text-align:center">
+          <div style="font-size:11px;color:var(--muted)">g</div>
+          <button data-del-ing="${i}" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:2px">×</button>
+        </div>`;
+      }).join("")}
+    </div>
+
+    <!-- Total macros -->
+    <div style="background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.2);border-radius:var(--rs);padding:12px;margin-bottom:14px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin-bottom:8px">Total — ${Math.round(totalGrams)}g</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;text-align:center">
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#f97316">${total.cal}</div><div style="font-size:10px;color:var(--muted)">kcal</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#22c55e">${ri(total.p)}</div><div style="font-size:10px;color:var(--muted)">protein</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#4f8ef7">${ri(total.c)}</div><div style="font-size:10px;color:var(--muted)">carbs</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#eab308">${ri(total.f)}</div><div style="font-size:10px;color:var(--muted)">fat</div></div>
+      </div>
+    </div>
+    ` : `<div style="text-align:center;padding:16px;color:var(--muted);font-size:13px">Search and add ingredients above</div>`}
+
+    <button class="btn bp bfull blg" id="save-meal-btn" ${mb.ingredients.length===0||!mb.name.trim()?"style='opacity:.4;pointer-events:none'":""}>
+      💾 Save Meal to My Foods
+    </button>
+  </div></div>`;
 }
 
 function renderEditCustomFoodModal() {
@@ -2292,18 +2468,23 @@ function renderCoach() {
 // ── HISTORY ────────────────────────────────────────
 function renderHistory() {
   const prs = getPRs();
+  const fromWorkout = ST.tab === "workout";
+  const activeTab = ST.workoutView || ST.historyTab || "log";
   return `
   <div class="ph">
     <div style="display:flex;align-items:center;justify-content:space-between">
-      <div><div class="pt">${ST.historyTab==="prs"?"PERSONAL RECORDS":"WORKOUT LOG"}</div><div class="ps">${ST.historyTab==="prs"?prs.length+" lifts tracked":ST.workoutLogs.length+" sessions logged"}</div></div>
+      <div style="display:flex;align-items:center;gap:10px">
+        ${fromWorkout?`<button data-wview="plan" style="background:none;border:none;color:var(--accent);font-size:22px;cursor:pointer;padding:0 4px 0 0">←</button>`:""}
+        <div><div class="pt">${activeTab==="prs"?"PERSONAL RECORDS":"WORKOUT LOG"}</div><div class="ps">${activeTab==="prs"?prs.length+" lifts tracked":ST.workoutLogs.length+" sessions logged"}</div></div>
+      </div>
       <div style="display:flex;gap:6px;margin-bottom:2px">
-        <button data-htab="log" style="padding:7px 14px;border-radius:var(--rs);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${ST.historyTab==="log"?"var(--accent)":"var(--border)"};background:${ST.historyTab==="log"?"rgba(79,142,247,.15)":"var(--bg3)"};color:${ST.historyTab==="log"?"var(--accent)":"var(--muted)"}">📅 Log</button>
-        <button data-htab="prs" style="padding:7px 14px;border-radius:var(--rs);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${ST.historyTab==="prs"?"var(--yellow)":"var(--border)"};background:${ST.historyTab==="prs"?"rgba(234,179,8,.15)":"var(--bg3)"};color:${ST.historyTab==="prs"?"var(--yellow)":"var(--muted)"}">🏆 PRs</button>
+        <button data-${fromWorkout?"wview":"htab"}="log" style="padding:7px 14px;border-radius:var(--rs);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${activeTab==="log"?"var(--accent)":"var(--border)"};background:${activeTab==="log"?"rgba(79,142,247,.15)":"var(--bg3)"};color:${activeTab==="log"?"var(--accent)":"var(--muted)"}">📅 Log</button>
+        <button data-${fromWorkout?"wview":"htab"}="prs" style="padding:7px 14px;border-radius:var(--rs);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${activeTab==="prs"?"var(--yellow)":"var(--border)"};background:${activeTab==="prs"?"rgba(234,179,8,.15)":"var(--bg3)"};color:${activeTab==="prs"?"var(--yellow)":"var(--muted)"}">🏆 PRs</button>
       </div>
     </div>
   </div>
   <div style="height:12px"></div>
-  ${ST.historyTab==="prs" ? `
+  ${activeTab==="prs" ? `
     ${prs.length===0?`<div class="empty"><div class="empty-icon">🏆</div><div>Log your first workout to start tracking PRs!</div></div>`:`<div class="card" style="padding:0">${prs.map(([name,pr],i)=>`<div class="pr-item"><div class="pr-rank">${i<3?["🥇","🥈","🥉"][i]:(i+1)}</div><div class="pr-info"><div class="pr-name">${name}</div><div class="pr-date">${fmtDate(pr.date)} · ${PLAN[pr.dayId]?.label||pr.dayId}</div></div><div class="pr-wt"><div class="pr-lbs" style="color:${PLAN[pr.dayId]?.color||"#4f8ef7"}">${pr.weight}</div><div class="pr-unit">lbs</div></div></div>`).join("")}</div>`}
   ` : `
     ${ST.workoutLogs.length===0?`<div class="empty"><div class="empty-icon">📅</div><div>Log your first workout to see history.</div></div>`:ST.workoutLogs.map(log=>{
@@ -2483,14 +2664,14 @@ document.addEventListener("click",      unlockAudio, {passive: true});
 
 function playBeeps() {
   var el = getBeepEl();
-  if(!el) return;
-  el.currentTime = 0;
-  el.volume = 1;
-  // Tell iOS to mix with background audio (music) rather than interrupting it
-  if(el.audioSession) {
-    try { el.audioSession.type = "transient"; } catch(e) {}
-  }
-  el.play().catch(function(e){ console.log("Audio play failed:", e); });
+  if(!el) { console.log("beep-sound element not found"); return; }
+  try {
+    el.currentTime = 0;
+    el.volume = 1;
+    if(el.audioSession) { try { el.audioSession.type = "transient"; } catch(e) {} }
+    var p = el.play();
+    if(p && p.catch) p.catch(function(e){ console.log("Beep play failed:", e.name, e.message); });
+  } catch(e) { console.log("Beep error:", e); }
 }
 
 function sendRestDoneNotification(restLabel) {
@@ -2595,17 +2776,13 @@ function attachAll() {
 
   // NAV — save scroll position of current tab before switching
   $$("[data-nav]").forEach(el=>el.addEventListener("click",()=>{
-    // Save scroll of the tab we're LEAVING
     const pg = document.getElementById("pg");
     if(pg) ST["scroll_" + ST.tab] = pg.scrollTop;
-    // Switch tab
     ST.tab = el.dataset.nav;
+    if(ST.tab === "workout") ST.workoutView = ST.workoutView || "plan";
     render();
-    // Restore scroll of the tab we're ENTERING (after render builds the new page)
     const newPg = document.getElementById("pg");
-    if(newPg && ST["scroll_" + ST.tab]) {
-      newPg.scrollTop = ST["scroll_" + ST.tab];
-    }
+    if(newPg && ST["scroll_" + ST.tab]) newPg.scrollTop = ST["scroll_" + ST.tab];
   }));
 
   // START DAY
@@ -2647,10 +2824,10 @@ function attachAll() {
     if(guide) guide.addEventListener("click", function(e){ e.stopPropagation(); toggleExBlock(id, true); });
     // Weight/rep inputs
     newBlock.querySelectorAll("[data-sw]").forEach(function(el){
-      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sw]) ST.activeSets[el.dataset.sw][+el.dataset.si].weight=el.value; });
+      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sw]) { ST.activeSets[el.dataset.sw][+el.dataset.si].weight=el.value; saveWorkoutProgress(); } });
     });
     newBlock.querySelectorAll("[data-sr]").forEach(function(el){
-      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sr]) ST.activeSets[el.dataset.sr][+el.dataset.si].reps=el.value; });
+      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sr]) { ST.activeSets[el.dataset.sr][+el.dataset.si].reps=el.value; saveWorkoutProgress(); } });
     });
     // Checkmark
     newBlock.querySelectorAll("[data-cs2]").forEach(function(el){
@@ -2716,10 +2893,10 @@ function attachAll() {
 
   // SET INPUTS — just update state in memory, don't re-render
   $$("[data-sw]").forEach(el=>el.addEventListener("input",()=>{
-    if(ST.activeSets[el.dataset.sw]) ST.activeSets[el.dataset.sw][+el.dataset.si].weight=el.value;
+    if(ST.activeSets[el.dataset.sw]) { ST.activeSets[el.dataset.sw][+el.dataset.si].weight=el.value; saveWorkoutProgress(); }
   }));
   $$("[data-sr]").forEach(el=>el.addEventListener("input",()=>{
-    if(ST.activeSets[el.dataset.sr]) ST.activeSets[el.dataset.sr][+el.dataset.si].reps=el.value;
+    if(ST.activeSets[el.dataset.sr]) { ST.activeSets[el.dataset.sr][+el.dataset.si].reps=el.value; saveWorkoutProgress(); }
   }));
 
   // COMPLETE SET
@@ -2752,18 +2929,19 @@ function attachAll() {
   }));
 
   // WORKOUT ACTIONS
-  $("[data-action='clear-day']")?.addEventListener("click",()=>{ST.activeDay=null;ST.activeSets={};ST.openEx={};ST.openGuide={};render();});
+  $("[data-action='clear-day']")?.addEventListener("click",()=>{ST.activeDay=null;ST.activeSets={};ST.openEx={};ST.openGuide={};clearWorkoutProgress();render();});
   $("[data-action='finish-workout']")?.addEventListener("click",()=>{
     const plan=PLAN[ST.activeDay]; if(!plan) return;
     const exercises=plan.exercises.map(ex=>({id:ex.id,name:ex.name,sets:(ST.activeSets[ex.id]||[]).map(s=>({...s}))})).filter(ex=>ex.sets.some(s=>s.weight||s.reps||s.done));
     const log={id:Date.now().toString(),dayId:ST.activeDay,date:today(),duration:plan.duration,exercises};
     ST.workoutLogs.unshift(log);
     saveWorkoutLog(log);
-    ST.activeDay=null; ST.activeSets={}; ST.openEx={}; ST.openGuide={}; stopTimer(); ST.tab="history"; render();
+    ST.activeDay=null; ST.activeSets={}; ST.openEx={}; ST.openGuide={}; stopTimer(); ST.tab="history"; clearWorkoutProgress(); render();
   });
 
   // TIMER
-  $("[data-action='stop-timer']")?.addEventListener("click",stopTimer);
+  // TIMER STOP — use document-level delegation so it works from any tab
+  // (already set up at boot via document.addEventListener below)
 
   // VIEW PHOTO fullscreen (close button)
   $("[data-action='close-photo']")?.addEventListener("click", () => { ST.viewingPhoto = null; render(); });
@@ -2852,6 +3030,20 @@ function attachAll() {
   // WATER
   $$("[data-water]").forEach(el=>el.addEventListener("click",()=>addWater(parseFloat(el.dataset.water))));
 
+  // PREVIOUS DAY WATER & STEPS (This Week view)
+  $$("[data-day-water]").forEach(el=>el.addEventListener("click",()=>{
+    var date=el.dataset.day, amt=parseFloat(el.dataset.dayWater);
+    var log=ST.nutritionLogs.find(function(l){return l.date===date&&l.type==="water";});
+    if(log){ log.liters=Math.max(0,Math.round((log.liters+amt)*100)/100); saveWaterLog(log); }
+    else if(amt>0){ var nl={id:date+"_water",date:date,type:"water",liters:amt}; ST.nutritionLogs.unshift(nl); saveWaterLog(nl); }
+    render();
+  }));
+  $$("[data-day-steps]").forEach(el=>el.addEventListener("click",()=>{
+    var date=el.dataset.day, amt=parseInt(el.dataset.daySteps);
+    upsertDailyLog(date,{steps:Math.max(0,(getDailyLog(date)?.steps||0)+amt), sleep_hours:getDailyLog(date)?.sleep_hours||0});
+    render();
+  }));
+
   // WEEK DAY SELECTION (This Week tab)
   $$("[data-week-day]").forEach(el=>el.addEventListener("click",()=>{
     ST.weekDay=el.dataset.weekDay; render();
@@ -2867,13 +3059,6 @@ function attachAll() {
 
   // NUTRITION TAB
   $$("[data-nut-tab]").forEach(el=>el.addEventListener("click",()=>{ST.nutTab=el.dataset.nutTab;render();}));
-
-  // CHEAT SHEET SEARCH — only update table, never page scroll
-  const csEl=document.getElementById("cs-search-input");
-  if(csEl) {
-    csEl.addEventListener("input",()=>{ST.csSearch=csEl.value;ST.csExpanded=null;updateCSTable();});
-    // Don't auto-focus — causes keyboard popup when tapping filter pills
-  }
 
   // CHEAT SHEET FILTER PILLS
   $$("[data-cs-filter]").forEach(el=>el.addEventListener("click",()=>{
@@ -2897,8 +3082,9 @@ function attachAll() {
   $$("[data-prefill]").forEach(el=>el.addEventListener("click",e=>{
     e.stopPropagation();
     try { ST.foodEntry.food=JSON.parse(el.dataset.prefill.replace(/&#39;/g,"'")); } catch {}
-    ST.foodEntry.grams=""; ST.foodSearch=ST.foodEntry.food?.n||""; ST.foodResults=[];
-    ST.showFoodModal=true; ST.tab="nutrition"; render();
+    ST.foodEntry.grams = ST.foodEntry.food?.serving_grams && ST.foodEntry.food?.food_type!=="A" ? String(ST.foodEntry.food.serving_grams) : "";
+    ST.foodSearch=ST.foodEntry.food?.n||""; ST.foodResults=[];
+    ST.showFoodModal=true; ST.showCheatPanel=false; ST.tab="nutrition"; render();
   }));
 
   // HISTORY EXPAND
@@ -2983,12 +3169,105 @@ function attachAll() {
   });
 
   // CHEAT SHEET PANEL
-  $("[data-action='open-cheat']")?.addEventListener("click",()=>{ST.showCheatPanel=true;render();});
+  function attachCSSearch() {
+    var csEl = document.getElementById("cs-search-input");
+    if(csEl && !csEl._attached) {
+      csEl._attached = true;
+      csEl.addEventListener("input", function(){ ST.csSearch=csEl.value; ST.csExpanded=null; updateCSTable(); });
+    }
+  }
+  $("[data-action='open-cheat']")?.addEventListener("click",()=>{ST.showCheatPanel=true; render(); attachCSSearch();});
   $("[data-action='close-cheat']")?.addEventListener("click",()=>{ST.showCheatPanel=false;render();});
   document.getElementById("close-cheat-btn")?.addEventListener("click",function(e){
     e.stopPropagation(); ST.showCheatPanel=false; render();
   });
+  attachCSSearch(); // also try on every attachAll in case panel was already open
   // Delete custom food
+  // MEAL BUILDER
+  $("[data-action='open-meal-builder']")?.addEventListener("click",()=>{
+    ST.showMealBuilder=true; ST.mealBuilder={name:"",ingredients:[],search:"",results:[]}; render();
+  });
+  $("[data-action='close-meal-builder']")?.addEventListener("click",()=>{ST.showMealBuilder=false;render();});
+  document.getElementById("close-meal-btn")?.addEventListener("click",function(e){
+    e.stopPropagation(); ST.showMealBuilder=false; render();
+  });
+  // Meal name input
+  var mnEl=document.getElementById("meal-name-input");
+  if(mnEl) mnEl.addEventListener("input",function(){ ST.mealBuilder.name=mnEl.value; });
+  // Meal ingredient search
+  var msEl=document.getElementById("meal-search-input");
+  if(msEl) msEl.addEventListener("input",function(){
+    ST.mealBuilder.search=msEl.value;
+    var resultsEl=msEl.closest(".fgrp")?.querySelector(".fsr");
+    // Re-render just the meal builder to show results
+    var modal=document.querySelector(".moverlay .modal");
+    if(modal){ modal.innerHTML=renderMealBuilder().match(/<div class="mhandle">([\s\S]*)/)?.[0]||""; }
+    render();
+  });
+  // Add ingredient from search results
+  $$("[data-meal-food]").forEach(el=>el.addEventListener("click",e=>{
+    e.stopPropagation();
+    try {
+      var food=JSON.parse(el.dataset.mealFood.replace(/&#39;/g,"'"));
+      ST.mealBuilder.ingredients.push({food:food, grams:"100"});
+      ST.mealBuilder.search="";
+      render();
+      // Focus grams input for the new ingredient
+      setTimeout(function(){
+        var inputs=document.querySelectorAll("[data-ing-grams]");
+        if(inputs.length) inputs[inputs.length-1].select();
+      },50);
+    } catch(e2){}
+  }));
+  // Ingredient grams inputs
+  $$("[data-ing-grams]").forEach(el=>el.addEventListener("input",function(){
+    var idx=parseInt(el.dataset.ingGrams);
+    if(ST.mealBuilder.ingredients[idx]) ST.mealBuilder.ingredients[idx].grams=el.value;
+    // Update totals display without full render
+    var totalEl=document.querySelector("[data-meal-total]");
+    // Just do a full render since it's fast enough
+    render();
+  }));
+  // Delete ingredient
+  $$("[data-del-ing]").forEach(el=>el.addEventListener("click",e=>{
+    e.stopPropagation();
+    ST.mealBuilder.ingredients.splice(parseInt(el.dataset.delIng),1);
+    render();
+  }));
+  // Save meal
+  document.getElementById("save-meal-btn")?.addEventListener("click",function(){
+    var mb=ST.mealBuilder;
+    if(!mb.name.trim()||mb.ingredients.length===0) return;
+    var totalGrams=mb.ingredients.reduce(function(t,ing){return t+parseFloat(ing.grams||0);},0);
+    var total=mb.ingredients.reduce(function(t,ing){
+      var m=calcMacros(ing.food,ing.grams);
+      return {cal:t.cal+m.cal,p:t.p+m.p,c:t.c+m.c,f:t.f+m.f};
+    },{cal:0,p:0,c:0,f:0});
+    // Save as custom food with macros per 100g
+    var mealFood={
+      id: mb.name.trim().replace(/\s+/g,"_").toLowerCase()+"_meal_"+Date.now(),
+      n: mb.name.trim(),
+      cal: Math.round((total.cal/totalGrams)*100),
+      p: Math.round((total.p/totalGrams)*100*10)/10,
+      c: Math.round((total.c/totalGrams)*100*10)/10,
+      f: Math.round((total.f/totalGrams)*100*10)/10,
+      cat: "Custom Meal",
+      serving_label: "1 serving (~"+Math.round(totalGrams)+"g)",
+      serving_grams: Math.round(totalGrams),
+      food_type: "C",
+      source: "meal"
+    };
+    saveCustomFood(mealFood, "meal");
+    ST.showMealBuilder=false;
+    // Show success and go to food modal to log it
+    ST.foodEntry.food=mealFood;
+    ST.foodEntry.grams=String(Math.round(totalGrams));
+    ST.foodSearch=mealFood.n;
+    ST.foodResults=[];
+    render();
+    setTimeout(function(){alert("✅ \""+mealFood.n+"\" saved to My Foods! You can find it in search anytime.");},100);
+  });
+
   // EDIT CUSTOM FOOD
   $$("[data-edit-custom]").forEach(el=>el.addEventListener("click",e=>{
     e.stopPropagation();
@@ -3043,7 +3322,14 @@ function attachAll() {
     }
   }));
 
-  // HISTORY TAB TOGGLE (Log / PRs)
+  // WORKOUT VIEW TOGGLE (Log / PRs / back to plan)
+  $$("[data-wview]").forEach(el=>el.addEventListener("click",()=>{
+    ST.workoutView=el.dataset.wview;
+    if(ST.workoutView==="prs"||ST.workoutView==="log") ST.historyTab=ST.workoutView;
+    render();
+  }));
+
+  // HISTORY TAB TOGGLE (when not in workout tab)
   $$("[data-htab]").forEach(el=>el.addEventListener("click",()=>{ST.historyTab=el.dataset.htab;render();}));
 
   // EXPORT / IMPORT
@@ -3079,18 +3365,29 @@ function attachFoodModalInner() {
     });
   });
 
-  // Search input — must be re-attached every time modal inner rebuilds
+  // Search input — surgical update: only rebuild results, never touch the input itself
   var fsEl = document.getElementById("food-search-input");
   if(fsEl) {
     fsEl.addEventListener("input", function() {
       ST.foodSearch = fsEl.value;
       ST.foodResults = searchFoods(fsEl.value);
-      var modalEl = document.querySelector(".modal");
-      if(modalEl) {
-        modalEl.innerHTML = buildFoodModalInner();
-        attachFoodModalInner();
-        var newInput = document.getElementById("food-search-input");
-        if(newInput) { newInput.focus(); newInput.setSelectionRange(newInput.value.length, newInput.value.length); }
+      var belowEl = document.getElementById("food-below-search");
+      if(belowEl) {
+        belowEl.innerHTML = buildBelowSearch();
+        // Rewire result item clicks and Ask Claude button
+        belowEl.querySelectorAll("[data-sel-food]").forEach(function(el){
+          el.addEventListener("click", function(){
+            try { ST.foodEntry.food=JSON.parse(el.dataset.selFood.replace(/&#39;/g,"'")); } catch {}
+            ST.foodResults=[]; ST.foodSearch=ST.foodEntry.food.n;
+            if(ST.foodEntry.food.cat==="Claude Lookup" && ST.foodEntry.food.serving_grams && ST.foodEntry.food.food_type!=="A") {
+              ST.foodEntry.grams=String(ST.foodEntry.food.serving_grams);
+            } else if(!ST.editingFood) { ST.foodEntry.grams=""; }
+            var modalEl=document.querySelector(".modal");
+            if(modalEl){ modalEl.innerHTML=buildFoodModalInner(); attachFoodModalInner(); }
+          });
+        });
+        var askBtn2 = document.getElementById("ask-claude-btn");
+        if(askBtn2) askBtn2.addEventListener("click", function(){ lookupFoodWithClaude(ST.foodSearch); });
       }
     });
   }
@@ -3178,6 +3475,7 @@ function loadFromCache() {
 }
 
 function boot() {
+  loadWorkoutProgress();
   showLoader();
 
   // Set a 6 second timeout — if Supabase doesn't respond, use cache
@@ -3222,7 +3520,26 @@ function boot() {
   });
 }
 
-// Global safety net
+// Workout progress persistence — survives app close
+function saveWorkoutProgress() {
+  if(ST.activeDay) { S.set("wp_day", ST.activeDay); S.set("wp_sets", ST.activeSets); }
+}
+function clearWorkoutProgress() { S.set("wp_day", null); S.set("wp_sets", {}); }
+function loadWorkoutProgress() {
+  var day = S.get("wp_day", null);
+  var sets = S.get("wp_sets", null);
+  if(day && sets) { ST.activeDay = day; ST.activeSets = sets; }
+}
+
+// Global click delegation — handles elements that may not exist when attachAll runs
+document.addEventListener("click", function(e) {
+  // Timer stop button — works from any tab
+  var stopBtn = e.target.closest("[data-action='stop-timer']");
+  if(stopBtn) { e.stopPropagation(); stopTimer(); render(); return; }
+  // Tempo explanation popup
+  var tempoEl = e.target.closest("[data-tempo]");
+  if(tempoEl) { e.stopPropagation(); ST.tempoPopup=tempoEl.dataset.tempo; render(); return; }
+}, true);
 window.addEventListener("error", function(e) { console.error("App error:", e); });
 window.addEventListener("unhandledrejection", function(e) { console.error("Promise error:", e); });
 
