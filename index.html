@@ -2065,6 +2065,33 @@ function buildCSTableHTML() {
     }).join("");
 }
 
+function updateMealTotals() {
+  var mb = ST.mealBuilder;
+  var total = mb.ingredients.reduce(function(t, ing) {
+    var m = calcMacros(ing.food, ing.grams);
+    return {cal:t.cal+m.cal, p:t.p+m.p, c:t.c+m.c, f:t.f+m.f};
+  }, {cal:0,p:0,c:0,f:0});
+  var totalGrams = mb.ingredients.reduce(function(t,ing){ return t+parseFloat(ing.grams||0); }, 0);
+  // Update total display
+  var totEl = document.getElementById("meal-total-display");
+  if(totEl) {
+    totEl.innerHTML = `
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin-bottom:8px">Total — ${Math.round(totalGrams)}g</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;text-align:center">
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#f97316">${total.cal}</div><div style="font-size:10px;color:var(--muted)">kcal</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#22c55e">${ri(total.p)}</div><div style="font-size:10px;color:var(--muted)">protein</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#4f8ef7">${ri(total.c)}</div><div style="font-size:10px;color:var(--muted)">carbs</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#eab308">${ri(total.f)}</div><div style="font-size:10px;color:var(--muted)">fat</div></div>
+      </div>`;
+  }
+  // Update each ingredient's macro display
+  mb.ingredients.forEach(function(ing, i) {
+    var m = calcMacros(ing.food, ing.grams);
+    var macroEl = document.getElementById("ing-macros-"+i);
+    if(macroEl) macroEl.textContent = m.cal+" kcal · P:"+ri(m.p)+"g C:"+ri(m.c)+"g F:"+ri(m.f)+"g";
+  });
+}
+
 function renderMealBuilder() {
   var mb = ST.mealBuilder;
   // Calculate total macros
@@ -2094,11 +2121,14 @@ function renderMealBuilder() {
     <div class="fgrp" style="margin-bottom:8px">
       <label class="flbl">Add Ingredient</label>
       <input class="finput" id="meal-search-input" placeholder="Search food…" value="${mb.search}" autocomplete="off">
-      ${searchResults.length > 0 ? `<div class="fsr" style="margin-top:4px">${searchResults.map(f=>`
-        <div class="meal-add-item" data-meal-food='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat||""}).replace(/'/g,"&#39;")}' style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border)">
-          <div class="fsr-name">${f.n}</div>
+      <div id="meal-search-results">${searchResults.length > 0 ? `<div class="fsr" style="margin-top:4px">${searchResults.map(f=>{
+        var badge = f.source==="claude"||f.cat==="Claude Lookup" ? `<span style="font-size:9px;background:rgba(168,85,247,.15);color:var(--purple);padding:1px 5px;border-radius:99px;font-weight:700;margin-left:4px">🤖</span>` :
+                    f.source==="manual"||f.source==="meal" ? `<span style="font-size:9px;background:rgba(34,197,94,.15);color:var(--green);padding:1px 5px;border-radius:99px;font-weight:700;margin-left:4px">✏️</span>` :
+                    f.source==="photo" ? `<span style="font-size:9px;background:rgba(79,142,247,.15);color:var(--accent);padding:1px 5px;border-radius:99px;font-weight:700;margin-left:4px">📷</span>` : "";
+        return `<div class="meal-add-item" data-meal-food='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat||"",source:f.source||""}).replace(/'/g,"&#39;")}' style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center"><div class="fsr-name">${f.n}</div>${badge}</div>
           <div class="fsr-macros">${f.cal} kcal · P:${ri(f.p)}g C:${ri(f.c)}g F:${ri(f.f)}g per 100g</div>
-        </div>`).join("")}</div>` : ""}
+        </div>`;}).join("")}</div>` : ""}</div>
     </div>
 
     <!-- Ingredients list -->
@@ -2110,7 +2140,7 @@ function renderMealBuilder() {
         return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;background:var(--bg3);border-radius:var(--rs);padding:8px 10px">
           <div style="flex:1">
             <div style="font-weight:600;font-size:13px">${ing.food.n}</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px">${m.cal} kcal · P:${ri(m.p)}g C:${ri(m.c)}g F:${ri(m.f)}g</div>
+            <div id="ing-macros-${i}" style="font-size:11px;color:var(--muted);margin-top:2px">${m.cal} kcal · P:${ri(m.p)}g C:${ri(m.c)}g F:${ri(m.f)}g</div>
           </div>
           <input type="number" inputmode="decimal" data-ing-grams="${i}" value="${ing.grams}" style="width:60px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:5px;color:var(--text);font-size:13px;text-align:center">
           <div style="font-size:11px;color:var(--muted)">g</div>
@@ -2120,7 +2150,7 @@ function renderMealBuilder() {
     </div>
 
     <!-- Total macros -->
-    <div style="background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.2);border-radius:var(--rs);padding:12px;margin-bottom:14px">
+    <div style="background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.2);border-radius:var(--rs);padding:12px;margin-bottom:14px" id="meal-total-display">
       <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin-bottom:8px">Total — ${Math.round(totalGrams)}g</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;text-align:center">
         <div><div style="font-family:var(--font-d);font-size:20px;color:#f97316">${total.cal}</div><div style="font-size:10px;color:var(--muted)">kcal</div></div>
@@ -2918,6 +2948,9 @@ function attachAll() {
     const allDone=allSets.length>0&&allSets.every(s=>s.done);
     const exBlock=document.getElementById("ex-"+eid);
     if(exBlock) exBlock.style.borderColor=allDone?(PLAN[ST.activeDay]?.color||"#4f8ef7")+"55":"";
+    saveWorkoutProgress();
+    // Auto-collapse when all sets done
+    if(allDone) { ST.openEx[eid]=false; setTimeout(()=>toggleExBlock(eid,false),400); }
   }));
 
   // ADD SET — surgical: re-render just that exercise block
@@ -2929,7 +2962,7 @@ function attachAll() {
   }));
 
   // WORKOUT ACTIONS
-  $("[data-action='clear-day']")?.addEventListener("click",()=>{ST.activeDay=null;ST.activeSets={};ST.openEx={};ST.openGuide={};clearWorkoutProgress();render();});
+  $$("[data-action='clear-day']").forEach(el=>el.addEventListener("click",()=>{ST.activeDay=null;ST.activeSets={};ST.openEx={};ST.openGuide={};clearWorkoutProgress();render();}));
   $("[data-action='finish-workout']")?.addEventListener("click",()=>{
     const plan=PLAN[ST.activeDay]; if(!plan) return;
     const exercises=plan.exercises.map(ex=>({id:ex.id,name:ex.name,sets:(ST.activeSets[ex.id]||[]).map(s=>({...s}))})).filter(ex=>ex.sets.some(s=>s.weight||s.reps||s.done));
@@ -3198,35 +3231,53 @@ function attachAll() {
   var msEl=document.getElementById("meal-search-input");
   if(msEl) msEl.addEventListener("input",function(){
     ST.mealBuilder.search=msEl.value;
-    var resultsEl=msEl.closest(".fgrp")?.querySelector(".fsr");
-    // Re-render just the meal builder to show results
-    var modal=document.querySelector(".moverlay .modal");
-    if(modal){ modal.innerHTML=renderMealBuilder().match(/<div class="mhandle">([\s\S]*)/)?.[0]||""; }
-    render();
+    var results = msEl.value.length >= 1 ? searchFoods(msEl.value) : [];
+    var resultsEl = document.getElementById("meal-search-results");
+    if(resultsEl) {
+      if(results.length > 0) {
+        resultsEl.innerHTML = `<div class="fsr" style="margin-top:4px">${results.map(f=>{
+          var badge = f.source==="claude"||f.cat==="Claude Lookup" ? `<span style="font-size:9px;background:rgba(168,85,247,.15);color:var(--purple);padding:1px 5px;border-radius:99px;font-weight:700;margin-left:4px">🤖</span>` :
+                      f.source==="manual"||f.source==="meal" ? `<span style="font-size:9px;background:rgba(34,197,94,.15);color:var(--green);padding:1px 5px;border-radius:99px;font-weight:700;margin-left:4px">✏️</span>` :
+                      f.source==="photo" ? `<span style="font-size:9px;background:rgba(79,142,247,.15);color:var(--accent);padding:1px 5px;border-radius:99px;font-weight:700;margin-left:4px">📷</span>` : "";
+          return `<div class="meal-add-item" data-meal-food='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat||"",source:f.source||""}).replace(/'/g,"&#39;")}' style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border)">
+            <div style="display:flex;align-items:center"><div class="fsr-name">${f.n}</div>${badge}</div>
+            <div class="fsr-macros">${f.cal} kcal · P:${ri(f.p)}g C:${ri(f.c)}g F:${ri(f.f)}g per 100g</div>
+          </div>`;}).join("")}</div>`;
+        // Re-attach click listeners for new results
+        resultsEl.querySelectorAll("[data-meal-food]").forEach(function(el2){
+          el2.addEventListener("click",function(e){ e.stopPropagation(); addMealIngredient(el2.dataset.mealFood); });
+        });
+      } else {
+        resultsEl.innerHTML = "";
+      }
+    }
   });
-  // Add ingredient from search results
-  $$("[data-meal-food]").forEach(el=>el.addEventListener("click",e=>{
-    e.stopPropagation();
+
+  function addMealIngredient(dataStr) {
     try {
-      var food=JSON.parse(el.dataset.mealFood.replace(/&#39;/g,"'"));
+      var food=JSON.parse(dataStr.replace(/&#39;/g,"'"));
       ST.mealBuilder.ingredients.push({food:food, grams:"100"});
       ST.mealBuilder.search="";
       render();
-      // Focus grams input for the new ingredient
       setTimeout(function(){
         var inputs=document.querySelectorAll("[data-ing-grams]");
-        if(inputs.length) inputs[inputs.length-1].select();
-      },50);
+        if(inputs.length) { inputs[inputs.length-1].focus(); inputs[inputs.length-1].select(); }
+      },100);
     } catch(e2){}
+  }
+
+  // Add ingredient from search results
+  $$("[data-meal-food]").forEach(el=>el.addEventListener("click",e=>{
+    e.stopPropagation(); addMealIngredient(el.dataset.mealFood);
   }));
-  // Ingredient grams inputs
+  // Ingredient grams inputs — update state without re-rendering
   $$("[data-ing-grams]").forEach(el=>el.addEventListener("input",function(){
     var idx=parseInt(el.dataset.ingGrams);
-    if(ST.mealBuilder.ingredients[idx]) ST.mealBuilder.ingredients[idx].grams=el.value;
-    // Update totals display without full render
-    var totalEl=document.querySelector("[data-meal-total]");
-    // Just do a full render since it's fast enough
-    render();
+    if(ST.mealBuilder.ingredients[idx]) {
+      ST.mealBuilder.ingredients[idx].grams=el.value;
+      // Update just the macro display for this ingredient and the total
+      updateMealTotals();
+    }
   }));
   // Delete ingredient
   $$("[data-del-ing]").forEach(el=>el.addEventListener("click",e=>{
@@ -3522,13 +3573,39 @@ function boot() {
 
 // Workout progress persistence — survives app close
 function saveWorkoutProgress() {
-  if(ST.activeDay) { S.set("wp_day", ST.activeDay); S.set("wp_sets", ST.activeSets); }
+  if(ST.activeDay) {
+    S.set("wp_day", ST.activeDay);
+    S.set("wp_sets", ST.activeSets);
+    S.set("wp_openex", ST.openEx);
+  }
 }
-function clearWorkoutProgress() { S.set("wp_day", null); S.set("wp_sets", {}); }
+function clearWorkoutProgress() {
+  S.set("wp_day", null);
+  S.set("wp_sets", {});
+  S.set("wp_openex", {});
+}
 function loadWorkoutProgress() {
   var day = S.get("wp_day", null);
   var sets = S.get("wp_sets", null);
-  if(day && sets) { ST.activeDay = day; ST.activeSets = sets; }
+  var openEx = S.get("wp_openex", null);
+  if(day && sets) {
+    ST.activeDay = day;
+    ST.activeSets = sets;
+    ST.openEx = openEx || {};
+    // Auto-expand exercises that have partial progress (started but not all done)
+    var plan = PLAN[day];
+    if(plan) {
+      plan.exercises.forEach(function(ex) {
+        var exSets = sets[ex.id] || [];
+        var hasAny = exSets.some(function(s){ return s.weight || s.reps; });
+        var allDone = exSets.length > 0 && exSets.every(function(s){ return s.done; });
+        // Expand if started but not fully done
+        if(hasAny && !allDone) ST.openEx[ex.id] = true;
+        // Collapse if all done
+        if(allDone) ST.openEx[ex.id] = false;
+      });
+    }
+  }
 }
 
 // Global click delegation — handles elements that may not exist when attachAll runs
