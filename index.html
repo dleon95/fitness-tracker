@@ -2949,8 +2949,31 @@ function attachAll() {
     const exBlock=document.getElementById("ex-"+eid);
     if(exBlock) exBlock.style.borderColor=allDone?(PLAN[ST.activeDay]?.color||"#4f8ef7")+"55":"";
     saveWorkoutProgress();
-    // Auto-collapse when all sets done
-    if(allDone) { ST.openEx[eid]=false; setTimeout(()=>toggleExBlock(eid,false),400); }
+    // Auto-collapse when all sets done — use setTimeout to let checkmark animation show first
+    if(allDone) {
+      ST.openEx[eid] = false;
+      saveWorkoutProgress();
+      setTimeout(function(){
+        var block = document.getElementById("ex-"+eid);
+        if(!block) return;
+        // Find the exercise in the plan and re-render just that block
+        var planEx = null, planIdx = 0;
+        if(ST.activeDay && PLAN[ST.activeDay]) {
+          PLAN[ST.activeDay].exercises.forEach(function(e,i){ if(e.id===eid){planEx=e;planIdx=i;} });
+        }
+        if(!planEx) return;
+        var newHTML = renderExBlock(planEx, planIdx);
+        var temp = document.createElement("div");
+        temp.innerHTML = newHTML;
+        var newEl = temp.firstElementChild;
+        if(newEl && block.parentNode) {
+          block.parentNode.replaceChild(newEl, block);
+          // Re-attach just the header toggle
+          var hdr = newEl.querySelector("[data-toggle-ex]");
+          if(hdr) hdr.addEventListener("click", function(){ toggleExBlock(eid, false); });
+        }
+      }, 500);
+    }
   }));
 
   // ADD SET — surgical: re-render just that exercise block
@@ -3259,10 +3282,19 @@ function attachAll() {
       ST.mealBuilder.ingredients.push({food:food, grams:"100"});
       ST.mealBuilder.search="";
       render();
-      setTimeout(function(){
-        var inputs=document.querySelectorAll("[data-ing-grams]");
-        if(inputs.length) { inputs[inputs.length-1].focus(); inputs[inputs.length-1].select(); }
-      },100);
+      // Use requestAnimationFrame + setTimeout to ensure DOM is fully ready
+      requestAnimationFrame(function(){
+        setTimeout(function(){
+          var inputs=document.querySelectorAll("[data-ing-grams]");
+          if(inputs.length) {
+            var last = inputs[inputs.length-1];
+            last.focus();
+            last.select();
+            // Trigger click to ensure iOS keyboard opens immediately
+            last.click();
+          }
+        }, 100);
+      });
     } catch(e2){}
   }
 
