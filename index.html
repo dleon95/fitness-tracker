@@ -572,7 +572,7 @@ const ST = {
   workoutView: "plan",
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {},
   restTimer: null,
-  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]},
+  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]}, breakdown: null,
   expandedLog: null,
   foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""}, photoLookingUp: false,
   nutTab: "today",
@@ -718,6 +718,7 @@ function saveCustomFood(food_entry, source) {
 
 async function lookupFoodWithClaude(query) {
   ST.foodLookingUp = true;
+  ST.breakdown = null;
   var modalEl = document.querySelector(".modal");
   if(modalEl) { modalEl.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
 
@@ -727,71 +728,66 @@ async function lookupFoodWithClaude(query) {
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
         model: "claude-sonnet-4-5",
-        max_tokens: 300,
+        max_tokens: 800,
         messages: [{
           role: "user",
-          content: `Look up the nutrition info for: "${query}"
+          content: `Look up nutrition info for: "${query}"
 
-Determine what TYPE of food this is and respond accordingly:
+Determine the TYPE:
+A = Raw ingredient (chicken, rice, oats) — return per 100g, no breakdown needed
+B = Restaurant item (Big Mac, Wendy's sandwich) — return whole item, no breakdown needed  
+E = Liquid/beverage — return per 100ml, no breakdown needed
+C = Recipe/dish (lomo saltado, pad thai, curry) — return WITH ingredient breakdown
+D = Combo meal — return WITH ingredient breakdown
 
-TYPE A — Raw solid ingredient (chicken breast, rice, oats, etc.):
-Return macros per 100g. Set serving_label to "per 100g" and serving_grams to 100.
+For types A, B, E respond with:
+{"name":"food name","cal":0,"p":0,"c":0,"f":0,"serving_label":"description","serving_grams":0,"type":"A|B|E"}
 
-TYPE B — Restaurant/fast food item (Big Mac, Wendy's sandwich, etc.):
-Return macros for the WHOLE item. Set serving_label (e.g. "1 sandwich") and serving_grams to approximate weight in grams.
+For types C and D respond with a breakdown of each component:
+{"name":"dish name","type":"C","serving_label":"1 serving","serving_grams":0,"components":[
+  {"name":"ingredient name","grams":0,"cal":0,"p":0,"c":0,"f":0},
+  {"name":"ingredient name","grams":0,"cal":0,"p":0,"c":0,"f":0}
+]}
 
-TYPE C — Recipe/dish (lomo saltado, pad thai, etc.):
-Return macros for a typical serving. Set serving_label (e.g. "1 serving ~350g") and serving_grams to typical weight.
-
-TYPE D — Combo meal (Wendy's combo, McDonald's meal, etc.):
-Return macros for the full combo. Set serving_label and serving_grams to approximate total weight.
-
-TYPE E — Liquid/beverage (milk, juice, coffee, smoothie, protein shake, sports drink, etc.):
-Return macros per 100ml. Set serving_label to "per 100ml" and serving_grams to 100. Note: for liquids, serving_grams represents ml.
-
-Respond with ONLY a JSON object, no other text:
-{"name":"exact food name","cal":000,"p":00.0,"c":00.0,"f":00.0,"serving_label":"description","serving_grams":000,"type":"A|B|C|D|E"}
-
-Use real nutritional data. For restaurant items use actual menu nutrition if known.`
+List EVERY ingredient including oil, sauce, garnishes. Macros for each component are for the stated grams (not per 100g).
+Use realistic restaurant portion sizes. Respond with ONLY the JSON, no other text.`
         }]
       })
     });
     var rawText = await resp.text();
-    console.log("Worker status:", resp.status);
-    if(!resp.ok) { throw new Error("Worker error " + resp.status); }
+    if(!resp.ok) throw new Error("Worker error " + resp.status);
     var json = JSON.parse(rawText);
     var text = (json.content && json.content[0] && json.content[0].text) || "";
     var match = text.match(/\{[\s\S]*\}/);
     if(match) {
       var food = JSON.parse(match[0]);
-      if(food.name && food.cal !== undefined && food.p !== undefined) {
-        // For non-raw items, normalize macros to per-100g equivalent for our calcMacros system
-        // but store the serving info so we can pre-fill grams and show the label
+      if(food.name) {
+        if((food.type==="C"||food.type==="D") && food.components && food.components.length > 0) {
+          // Breakdown mode — show editable ingredient list
+          ST.foodLookingUp = false;
+          ST.breakdown = {
+            name: food.name,
+            serving_label: food.serving_label || "1 serving",
+            components: food.components.map(function(c){ return {name:c.name, grams:c.grams, cal:c.cal, p:c.p||0, c:c.c||0, f:c.f||0}; }),
+            bdSearch: ""
+          };
+          var modalEl2 = document.querySelector(".modal");
+          if(modalEl2) { modalEl2.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+          return;
+        }
+        // Simple item — old flow
         var sg = food.serving_grams || 100;
         var food_entry = {
-          n:    food.name,
-          cal:  Math.round((food.cal / sg) * 100),
-          p:    Math.round((food.p  / sg) * 100 * 10) / 10,
-          c:    Math.round((food.c  / sg) * 100 * 10) / 10,
-          f:    Math.round((food.f  / sg) * 100 * 10) / 10,
-          cat:  "Claude Lookup",
-          serving_label: food.serving_label || "per 100g",
-          serving_grams: sg,
-          food_type: food.type || "A"
+          n: food.name, cal: Math.round((food.cal/sg)*100),
+          p: Math.round((food.p/sg)*100*10)/10, c: Math.round((food.c/sg)*100*10)/10, f: Math.round((food.f/sg)*100*10)/10,
+          cat: "Claude Lookup", serving_label: food.serving_label||"per 100g", serving_grams: sg, food_type: food.type||"A"
         };
         ST.foodLookingUp = false;
         ST.foodResults = [food_entry];
-        // Auto-save to custom foods list so it appears in future searches
         saveCustomFood(food_entry);
-        // Pre-fill grams with the natural serving size
         ST.pendingServingGrams = sg;
-        var modalEl2 = document.querySelector(".modal");
-        if(modalEl2) {
-          modalEl2.innerHTML = buildFoodModalInner();
-          attachFoodModalInner();
-          var ni = document.getElementById("food-search-input");
-          if(ni){ni.focus();ni.setSelectionRange(ni.value.length,ni.value.length);}
-        }
+        var modalEl3 = document.querySelector(".modal");
+        if(modalEl3) { modalEl3.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
         return;
       }
     }
@@ -799,8 +795,8 @@ Use real nutritional data. For restaurant items use actual menu nutrition if kno
 
   ST.foodLookingUp = false;
   ST.foodResults = [];
-  var modalEl3 = document.querySelector(".modal");
-  if(modalEl3) { modalEl3.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+  var modalEl4 = document.querySelector(".modal");
+  if(modalEl4) { modalEl4.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
 }
 
 async function lookupFoodFromPhoto(file) {
@@ -834,21 +830,26 @@ async function lookupFoodFromPhoto(file) {
             },
             {
               type: "text",
-              text: `Look at this image and identify the food. This could be:
-- A plate of food or meal → estimate portions and total macros for what's shown
-- A nutrition label → read the exact values from the label, use the serving size shown
-- A barcode or UPC code → identify the product from the barcode number, then look up its nutrition info
-- A single food item → identify it and return macros for what's shown
+              text: `Look at this image and identify the food.
 
 If it's a NUTRITION LABEL: read calories, protein, carbs, fat exactly as printed. Use the serving size on the label.
-If it's a BARCODE: read the barcode number, identify the product (e.g. "Kind Bar Dark Chocolate"), then provide nutrition for one serving.
-If it's a PLATE/MEAL: identify components, estimate portions from visual size, return total macros.
-If it's a SINGLE ITEM: identify and estimate macros for what's shown.
+Respond: {"name":"product name","cal":0,"p":0,"c":0,"f":0,"serving_label":"1 serving (Xg)","serving_grams":0,"type":"D"}
 
-Respond with ONLY a JSON object, no other text:
-{"name":"food name","cal":000,"p":00,"c":00,"f":00,"serving_label":"what was analyzed","serving_grams":000,"type":"A|B|C|D","notes":"brief confidence note"}
+If it's a BARCODE: identify the product, provide nutrition for one serving.
+Respond: {"name":"product name","cal":0,"p":0,"c":0,"f":0,"serving_label":"1 serving","serving_grams":0,"type":"D"}
 
-Type: A=raw ingredient, B=restaurant item, C=home meal, D=packaged food`
+If it's a SINGLE FOOD ITEM (one ingredient): identify and return macros for what's shown.
+Respond: {"name":"food name","cal":0,"p":0,"c":0,"f":0,"serving_label":"what's shown","serving_grams":0,"type":"A"}
+
+If it's a PLATE WITH MULTIPLE COMPONENTS: identify EVERY component separately with estimated portions.
+Respond: {"name":"dish name","type":"C","serving_label":"1 plate","serving_grams":0,"components":[
+  {"name":"component name","grams":0,"cal":0,"p":0,"c":0,"f":0},
+  {"name":"component name","grams":0,"cal":0,"p":0,"c":0,"f":0}
+]}
+
+For multi-component plates, list every visible item including rice, sides, sauces, garnishes.
+Macros for each component are for the stated grams (not per 100g).
+Respond with ONLY the JSON, no other text.`
             }
           ]
         }]
@@ -862,29 +863,35 @@ Type: A=raw ingredient, B=restaurant item, C=home meal, D=packaged food`
     var match = text.match(/\{[\s\S]*\}/);
     if(match) {
       var food = JSON.parse(match[0]);
-      if(food.name && food.cal !== undefined) {
+      if(food.name) {
+        // Multi-component plate → breakdown mode
+        if(food.type==="C" && food.components && food.components.length > 0) {
+          ST.photoLookingUp = false;
+          ST.breakdown = {
+            name: food.name,
+            serving_label: food.serving_label || "1 plate",
+            components: food.components.map(function(c){ return {name:c.name, grams:c.grams, cal:c.cal, p:c.p||0, c:c.c||0, f:c.f||0}; }),
+            bdSearch: "",
+            fromPhoto: true
+          };
+          var modalEl2 = document.querySelector(".modal");
+          if(modalEl2) { modalEl2.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+          return;
+        }
+        // Single item / label / barcode → simple mode
         var sg = food.serving_grams || 100;
         var food_entry = {
-          n: food.name,
-          cal: Math.round((food.cal / sg) * 100),
-          p: Math.round((food.p / sg) * 100 * 10) / 10,
-          c: Math.round((food.c / sg) * 100 * 10) / 10,
-          f: Math.round((food.f / sg) * 100 * 10) / 10,
-          cat: "Photo Lookup",
-          serving_label: food.serving_label || "1 serving",
-          serving_grams: sg,
-          food_type: food.type || "C",
-          source: "photo",
-          notes: food.notes || ""
+          n: food.name, cal: Math.round((food.cal/sg)*100),
+          p: Math.round((food.p/sg)*100*10)/10, c: Math.round((food.c/sg)*100*10)/10, f: Math.round((food.f/sg)*100*10)/10,
+          cat: "Photo Lookup", serving_label: food.serving_label||"1 serving",
+          serving_grams: sg, food_type: food.type||"C", source: "photo"
         };
         ST.photoLookingUp = false;
         ST.foodResults = [food_entry];
-        // Pre-fill grams with serving size
         ST.pendingServingGrams = sg;
-        // Auto-save to custom foods
         saveCustomFood(food_entry, "photo");
-        var modalEl2 = document.querySelector(".modal");
-        if(modalEl2) { modalEl2.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+        var modalEl3 = document.querySelector(".modal");
+        if(modalEl3) { modalEl3.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
         return;
       }
     }
@@ -1969,8 +1976,61 @@ function buildFoodModalInner() {
   }
 
   // Determine what to show below search box
-  var belowSearch = "";
   var belowSearch = buildBelowSearch();
+
+  // Breakdown mode — show editable component list
+  if(ST.breakdown) {
+    var bd = ST.breakdown;
+    var bdTotal = bd.components.reduce(function(t,c){ return {cal:t.cal+c.cal, p:t.p+c.p, c:t.c+c.c, f:t.f+c.f}; }, {cal:0,p:0,c:0,f:0});
+    var bdTotalG = bd.components.reduce(function(t,c){ return t+parseFloat(c.grams||0); }, 0);
+    var bdSearchResults = bd.bdSearch && bd.bdSearch.length >= 1 ? searchFoods(bd.bdSearch) : [];
+
+    return `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+      <button id="bd-back-btn" style="background:none;border:none;color:var(--accent);font-size:20px;cursor:pointer;padding:0">←</button>
+      <div>
+        <div style="font-family:var(--font-d);font-size:20px;letter-spacing:1px">${bd.name}</div>
+        <div style="font-size:11px;color:var(--muted)">Claude's estimate — adjust to match what you actually ate</div>
+      </div>
+    </div>
+
+    <!-- Components list -->
+    <div style="margin-bottom:12px">
+      ${bd.components.map(function(c, i) {
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;background:var(--bg3);border-radius:var(--rs);padding:8px 10px">
+          <div style="flex:1">
+            <div style="font-weight:600;font-size:13px">${c.name}</div>
+            <div id="bd-macros-${i}" style="font-size:11px;color:var(--muted);margin-top:1px">${c.cal} kcal · P:${ri(c.p)}g C:${ri(c.c)}g F:${ri(c.f)}g</div>
+          </div>
+          <input type="number" inputmode="decimal" id="bd-grams-${i}" value="${c.grams}" style="width:58px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--rs);padding:5px;color:var(--text);font-size:13px;text-align:center">
+          <div style="font-size:11px;color:var(--muted)">g</div>
+          <button id="bd-del-${i}" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:2px 4px">×</button>
+        </div>`;
+      }).join("")}
+    </div>
+
+    <!-- Add ingredient to breakdown -->
+    <div style="margin-bottom:12px">
+      <input class="finput" id="bd-search-input" placeholder="+ Add ingredient…" value="${bd.bdSearch||""}" autocomplete="off" style="margin-bottom:4px">
+      <div id="bd-search-results">${bdSearchResults.length > 0 ? `<div class="fsr">${bdSearchResults.map(f=>`<div class="bd-add-item" data-bd-food='${JSON.stringify({name:f.n,cal100:f.cal,p100:f.p,c100:f.c,f100:f.f}).replace(/'/g,"&#39;")}' style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border)"><div class="fsr-name">${f.n}</div><div class="fsr-macros">${f.cal} kcal per 100g</div></div>`).join("")}</div>` : ""}</div>
+    </div>
+
+    <!-- Totals -->
+    <div style="background:rgba(79,142,247,.08);border:1px solid rgba(79,142,247,.2);border-radius:var(--rs);padding:12px;margin-bottom:14px" id="bd-totals">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin-bottom:8px">Total — ${Math.round(bdTotalG)}g</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;text-align:center">
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#f97316">${Math.round(bdTotal.cal)}</div><div style="font-size:10px;color:var(--muted)">kcal</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#22c55e">${ri(bdTotal.p)}</div><div style="font-size:10px;color:var(--muted)">protein</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#4f8ef7">${ri(bdTotal.c)}</div><div style="font-size:10px;color:var(--muted)">carbs</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#eab308">${ri(bdTotal.f)}</div><div style="font-size:10px;color:var(--muted)">fat</div></div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px">
+      <button class="btn bp" style="flex:2" id="bd-log-btn">Log This Meal</button>
+      <button class="btn bg" style="flex:1;font-size:12px" id="bd-save-btn">💾 Save</button>
+    </div>`;
+  }
 
   return `
     ${ST.photoLookingUp ? `
@@ -2063,6 +2123,50 @@ function buildCSTableHTML() {
         <button class="btn bp" style="margin-top:10px;font-size:12px;padding:8px 16px" data-prefill='${JSON.stringify({n:f.n,cal:f.cal,p:f.p,c:f.c,f:f.f,cat:f.cat}).replace(/'/g,"&#39;")}'>+ Log This Food →</button>
       </div>`:""}`;
     }).join("");
+}
+
+function getBDTotal() {
+  if(!ST.breakdown) return {cal:0,p:0,c:0,f:0};
+  return ST.breakdown.components.reduce(function(t,c){ return {cal:t.cal+c.cal, p:t.p+c.p, c:t.c+c.c, f:t.f+c.f}; }, {cal:0,p:0,c:0,f:0});
+}
+function getBDTotalG() {
+  if(!ST.breakdown) return 100;
+  return Math.max(1, ST.breakdown.components.reduce(function(t,c){ return t+parseFloat(c.grams||0); }, 0));
+}
+function updateBDTotals() {
+  var tot = getBDTotal(), totalG = getBDTotalG();
+  var el = document.getElementById("bd-totals");
+  if(el) {
+    el.innerHTML = `<div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin-bottom:8px">Total — ${Math.round(totalG)}g</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;text-align:center">
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#f97316">${Math.round(tot.cal)}</div><div style="font-size:10px;color:var(--muted)">kcal</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#22c55e">${ri(tot.p)}</div><div style="font-size:10px;color:var(--muted)">protein</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#4f8ef7">${ri(tot.c)}</div><div style="font-size:10px;color:var(--muted)">carbs</div></div>
+        <div><div style="font-family:var(--font-d);font-size:20px;color:#eab308">${ri(tot.f)}</div><div style="font-size:10px;color:var(--muted)">fat</div></div>
+      </div>`;
+  }
+}
+function addBDIngredient(dataStr) {
+  try {
+    var f = JSON.parse(dataStr.replace(/&#39;/g,"'"));
+    var grams = 100;
+    ST.breakdown.components.push({
+      name: f.name, grams: grams,
+      cal: Math.round(f.cal100*grams/100), p: Math.round(f.p100*grams/100*10)/10,
+      c: Math.round(f.c100*grams/100*10)/10, f: Math.round(f.f100*grams/100*10)/10,
+      _cal100: f.cal100, _p100: f.p100, _c100: f.c100, _f100: f.f100
+    });
+    ST.breakdown.bdSearch = "";
+    var modal = document.querySelector(".modal");
+    if(modal) { modal.innerHTML = buildFoodModalInner(); attachFoodModalInner(); }
+    // Focus new grams input
+    requestAnimationFrame(function(){
+      setTimeout(function(){
+        var inputs = document.querySelectorAll("[id^='bd-grams-']");
+        if(inputs.length) { var last=inputs[inputs.length-1]; last.focus(); last.select(); }
+      }, 100);
+    });
+  } catch(e) { console.log("addBDIngredient error:", e); }
 }
 
 function updateMealTotals() {
@@ -3079,7 +3183,7 @@ function attachAll() {
     ST.showFoodModal=true; ST.foodSearch=""; ST.foodResults=[]; ST.foodEntry={food:null,grams:""}; ST.editingFood=null; render();
     setTimeout(()=>document.getElementById("food-search-input")?.focus(),100);
   });
-  $("[data-action='close-food']")?.addEventListener("click",()=>{ST.showFoodModal=false;ST.editingFood=null;render();});
+  $("[data-action='close-food']")?.addEventListener("click",()=>{ST.showFoodModal=false;ST.editingFood=null;ST.breakdown=null;ST.photoLookingUp=false;render();});
 
   attachFoodModalInner();
 
@@ -3427,6 +3531,84 @@ function attachAll() {
 function attachFoodModalInner() {
   var $ = function(sel){return document.querySelector(sel);};
   var $$ = function(sel){return document.querySelectorAll(sel);};
+
+  // BREAKDOWN MODE LISTENERS
+  var bdBackBtn = document.getElementById("bd-back-btn");
+  if(bdBackBtn) bdBackBtn.addEventListener("click", function(){ ST.breakdown=null; var modal=document.querySelector(".modal"); if(modal){modal.innerHTML=buildFoodModalInner();attachFoodModalInner();} });
+
+  if(ST.breakdown) {
+    ST.breakdown.components.forEach(function(c, i) {
+      // Store per-100g values on first load for recalculation
+      if(c._cal100 === undefined && c.grams > 0) {
+        c._cal100 = (c.cal / c.grams) * 100;
+        c._p100   = (c.p   / c.grams) * 100;
+        c._c100   = (c.c   / c.grams) * 100;
+        c._f100   = (c.f   / c.grams) * 100;
+      }
+      var gramsEl = document.getElementById("bd-grams-"+i);
+      if(gramsEl) gramsEl.addEventListener("input", function(){
+        var g = parseFloat(gramsEl.value) || 0;
+        c.grams = g;
+        if(c._cal100 !== undefined) {
+          c.cal = Math.round(c._cal100 * g / 100);
+          c.p   = Math.round(c._p100  * g / 100 * 10) / 10;
+          c.c   = Math.round(c._c100  * g / 100 * 10) / 10;
+          c.f   = Math.round(c._f100  * g / 100 * 10) / 10;
+        }
+        var macroEl = document.getElementById("bd-macros-"+i);
+        if(macroEl) macroEl.textContent = c.cal+" kcal · P:"+ri(c.p)+"g C:"+ri(c.c)+"g F:"+ri(c.f)+"g";
+        updateBDTotals();
+      });
+      var delBtn = document.getElementById("bd-del-"+i);
+      if(delBtn) delBtn.addEventListener("click", function(e){
+        e.stopPropagation();
+        ST.breakdown.components.splice(i, 1);
+        var modal = document.querySelector(".modal");
+        if(modal){ modal.innerHTML=buildFoodModalInner(); attachFoodModalInner(); }
+      });
+    });
+
+    // Breakdown search
+    var bdSearchEl = document.getElementById("bd-search-input");
+    if(bdSearchEl) bdSearchEl.addEventListener("input", function(){
+      ST.breakdown.bdSearch = bdSearchEl.value;
+      var results = bdSearchEl.value.length >= 1 ? searchFoods(bdSearchEl.value) : [];
+      var rEl = document.getElementById("bd-search-results");
+      if(rEl) {
+        rEl.innerHTML = results.length > 0 ? `<div class="fsr">${results.map(f=>`<div class="bd-add-item" data-bd-food='${JSON.stringify({name:f.n,cal100:f.cal,p100:f.p,c100:f.c,f100:f.f}).replace(/'/g,"&#39;")}' style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border)"><div class="fsr-name">${f.n}</div><div class="fsr-macros">${f.cal} kcal per 100g</div></div>`).join("")}</div>` : "";
+        rEl.querySelectorAll("[data-bd-food]").forEach(function(el2){
+          el2.addEventListener("click", function(e){ e.stopPropagation(); addBDIngredient(el2.dataset.bdFood); });
+        });
+      }
+    });
+    document.querySelectorAll("[data-bd-food]").forEach(function(el2){
+      el2.addEventListener("click", function(e){ e.stopPropagation(); addBDIngredient(el2.dataset.bdFood); });
+    });
+
+    var bdLogBtn = document.getElementById("bd-log-btn");
+    if(bdLogBtn) bdLogBtn.addEventListener("click", function(){
+      var bd=ST.breakdown, tot=getBDTotal(), totalG=getBDTotalG();
+      ST.foodEntry.food = {n:bd.name,cat:"Claude Lookup",food_type:"C",source:"claude",
+        cal:Math.round((tot.cal/totalG)*100), p:Math.round((tot.p/totalG)*100*10)/10,
+        c:Math.round((tot.c/totalG)*100*10)/10, f:Math.round((tot.f/totalG)*100*10)/10,
+        serving_label:"1 serving (~"+Math.round(totalG)+"g)", serving_grams:Math.round(totalG)};
+      ST.foodEntry.grams=String(Math.round(totalG)); ST.breakdown=null;
+      var modal=document.querySelector(".modal"); if(modal){modal.innerHTML=buildFoodModalInner();attachFoodModalInner();}
+    });
+    var bdSaveBtn = document.getElementById("bd-save-btn");
+    if(bdSaveBtn) bdSaveBtn.addEventListener("click", function(){
+      var bd=ST.breakdown, tot=getBDTotal(), totalG=getBDTotalG();
+      var meal = {id:bd.name.replace(/\s+/g,"_").toLowerCase()+"_"+Date.now(), n:bd.name,
+        cat:"Custom Meal", food_type:"C", source:"meal",
+        cal:Math.round((tot.cal/totalG)*100), p:Math.round((tot.p/totalG)*100*10)/10,
+        c:Math.round((tot.c/totalG)*100*10)/10, f:Math.round((tot.f/totalG)*100*10)/10,
+        serving_label:"1 serving (~"+Math.round(totalG)+"g)", serving_grams:Math.round(totalG)};
+      saveCustomFood(meal,"meal");
+      ST.foodEntry.food=meal; ST.foodEntry.grams=String(Math.round(totalG)); ST.breakdown=null;
+      var modal=document.querySelector(".modal"); if(modal){modal.innerHTML=buildFoodModalInner();attachFoodModalInner();}
+      setTimeout(function(){alert("✅ \""+meal.n+"\" saved to My Foods!");},100);
+    });
+  }
 
   // PHOTO INPUTS — camera and library
   var camEl = document.getElementById("food-photo-camera");
