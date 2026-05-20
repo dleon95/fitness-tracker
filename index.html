@@ -570,7 +570,7 @@ const ST = {
   chartRangeMeas: 28,
   charts: {},
   workoutView: "plan",
-  activeDay: null, activeSets: {}, openEx: {}, openGuide: {},
+  activeDay: null, activeSets: {}, openEx: {}, openGuide: {}, showDayPicker: false,
   restTimer: null,
   showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]}, breakdown: null,
   expandedLog: null,
@@ -907,6 +907,45 @@ Respond with ONLY the JSON, no other text.`
   }
 }
 // Get last N sessions for a specific exercise
+function autoCheckSet(eid, si) {
+  var sets = ST.activeSets[eid];
+  if(!sets || !sets[si]) return;
+  var set = sets[si];
+  if(set.done) return; // already checked
+  if(set.weight && set.reps) {
+    set.done = true;
+    saveWorkoutProgress();
+    // Update the checkmark visually
+    var chk = document.querySelector("[data-cs2='"+eid+"'][data-si='"+si+"']");
+    if(chk) { chk.className="schk done"; chk.textContent="✓"; }
+    var row = chk && chk.closest(".set-row");
+    if(row) { var sn=row.querySelector(".snum"); if(sn) sn.className="snum done"; }
+    // Start rest timer
+    var exPlan = ST.activeDay && PLAN[ST.activeDay] ? PLAN[ST.activeDay].exercises.find(function(e){return e.id===eid;}) : null;
+    if(exPlan) startTimer(exPlan.rest);
+    // Update border color
+    var allSets=ST.activeSets[eid]||[], allDone=allSets.length>0&&allSets.every(function(s){return s.done;});
+    var exBlock=document.getElementById("ex-"+eid);
+    if(exBlock) exBlock.style.borderColor=allDone?(PLAN[ST.activeDay]?.color||"#4f8ef7")+"55":"rgba(234,179,8,.65)";
+    // Auto-collapse if all done
+    if(allDone) {
+      ST.openEx[eid]=false;
+      saveWorkoutProgress();
+      setTimeout(function(){
+        var block=document.getElementById("ex-"+eid);
+        if(!block) return;
+        var pEx=null,pIdx=0;
+        if(ST.activeDay&&PLAN[ST.activeDay]) PLAN[ST.activeDay].exercises.forEach(function(e,i){if(e.id===eid){pEx=e;pIdx=i;}});
+        if(!pEx) return;
+        var temp=document.createElement("div"); temp.innerHTML=renderExBlock(pEx,pIdx);
+        var newEl=temp.firstElementChild;
+        if(newEl&&block.parentNode){ block.parentNode.replaceChild(newEl,block);
+          var h=newEl.querySelector("[data-toggle-ex]"); if(h) h.addEventListener("click",function(){toggleExBlock(eid,false);}); }
+      }, 500);
+    }
+  }
+}
+
 function getExSkipCount(exId, exName, dayId) {
   // Get the last N logs for this specific day
   var dayLogs = ST.workoutLogs.filter(function(l){ return l.dayId === dayId; }).slice(0, 4);
@@ -1349,7 +1388,7 @@ function renderTempoPopup() {
 function renderPage() {
   switch(ST.tab) {
     case "dashboard":  return renderDashboard();
-    case "workout":    return ST.workoutView==="log"||ST.workoutView==="prs" ? renderHistory() : (ST.activeDay ? renderWorkoutSession() : renderDayPicker());
+    case "workout":    return ST.workoutView==="log"||ST.workoutView==="prs" ? renderHistory() : (ST.activeDay && !ST.showDayPicker ? renderWorkoutSession() : renderDayPicker());
     case "nutrition":  return renderNutrition();
     case "cheatsheet": return renderCheatSheet();
     case "body":       return renderBody();
@@ -1624,16 +1663,17 @@ function renderDashboard() {
 // ── WORKOUT DAY PICKER ─────────────────────────────
 function renderDayPicker() {
   const td = getToday();
+  const inProgress = ST.activeDay && ST.showDayPicker;
   return `
   <div class="ph" style="display:flex;align-items:flex-end;justify-content:space-between">
-    <div><div class="pt">WORKOUT</div><div class="ps">Choose today's session</div></div>
+    <div><div class="pt">WORKOUT</div><div class="ps">${inProgress?"Viewing other days — your session is saved":"Choose today's session"}</div></div>
     <div style="display:flex;gap:6px;margin-bottom:14px">
       <button data-wview="log" title="Workout Log" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:8px 12px;font-size:16px;cursor:pointer;color:var(--muted)">📅</button>
       <button data-wview="prs" title="Personal Records" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:8px 12px;font-size:16px;cursor:pointer;color:var(--muted)">🏆</button>
     </div>
   </div>
   <div style="height:4px"></div>
-  ${DAY_ORDER.map(d=>{const plan=PLAN[d],last=ST.workoutLogs.find(l=>l.dayId===d),isToday=td===d;return`<div class="daycard" style="${isToday?`border-color:${plan.color}`:""}" data-start-day="${d}"><div class="dc-hdr"><div class="dc-dot" style="background:${plan.color}"></div><div><div class="dc-title" style="${isToday?`color:${plan.color}`:""}">${plan.emoji} ${plan.label} — ${plan.title}</div><div class="dc-meta">${plan.duration} · ${plan.exercises.length} exercises</div></div>${isToday?`<span class="pill pill-a">TODAY</span>`:""}</div><div class="dc-muscles">${plan.muscles}</div><div class="dc-foot"><span style="font-size:12px;color:var(--muted)">${last?`Last: ${fmtDate(last.date)}`:"Never logged"}</span><button class="btn bg" style="padding:7px 16px;font-size:13px">Start →</button></div></div>`;}).join("")}
+  ${DAY_ORDER.map(d=>{const plan=PLAN[d],last=ST.workoutLogs.find(l=>l.dayId===d),isToday=td===d,isActive=ST.activeDay===d&&inProgress;return`<div class="daycard" style="${isToday?`border-color:${plan.color}`:""}${isActive?`;border-color:var(--accent);background:rgba(79,142,247,.05)`:""}" data-start-day="${d}"><div class="dc-hdr"><div class="dc-dot" style="background:${plan.color}"></div><div><div class="dc-title" style="${isToday?`color:${plan.color}`:""}">${plan.emoji} ${plan.label} — ${plan.title}</div><div class="dc-meta">${plan.duration} · ${plan.exercises.length} exercises</div></div>${isToday?`<span class="pill pill-a">TODAY</span>`:""}${isActive?`<span class="pill" style="background:rgba(79,142,247,.2);color:var(--accent)">IN PROGRESS</span>`:""}</div><div class="dc-muscles">${plan.muscles}</div><div class="dc-foot"><span style="font-size:12px;color:var(--muted)">${last?`Last: ${fmtDate(last.date)}`:"Never logged"}</span><button class="btn ${isActive?"bp":"bg"}" style="padding:7px 16px;font-size:13px">${isActive?"Resume →":"Start →"}</button></div></div>`;}).join("")}
   <div style="height:20px"></div>`;
 }
 
@@ -1644,7 +1684,7 @@ function renderWorkoutSession() {
   return `
   <div style="padding:52px 20px 14px;position:sticky;top:0;background:rgba(10,10,15,.97);backdrop-filter:blur(20px);z-index:10;border-bottom:1px solid var(--border)">
     <div style="display:flex;align-items:center;gap:10px">
-      <button class="btn bg" style="padding:6px 12px;font-size:12px" data-action="clear-day">‹ Back</button>
+      <button class="btn bg" style="padding:6px 12px;font-size:12px" data-action="back-to-picker">‹ Back</button>
       <div><div style="font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--muted)">${plan.label}</div>
       <div style="font-family:var(--font-d);font-size:24px;letter-spacing:1px;color:${plan.color}">${plan.emoji} ${plan.title}</div></div>
     </div>
@@ -1662,7 +1702,9 @@ function renderWorkoutSession() {
 function renderExBlock(ex, idx) {
   const sets=ST.activeSets[ex.id]||[], open=ST.openEx[ex.id], guideOpen=ST.openGuide[ex.id];
   const doneCount=sets.filter(s=>s.done).length, allDone=doneCount===sets.length&&sets.length>0;
+  const hasAnyEntry=sets.some(function(s){return s.weight||s.reps;});
   const planColor=PLAN[ST.activeDay].color;
+  const borderStyle=allDone?`border-color:${planColor}55`:hasAnyEntry?`border-color:rgba(234,179,8,.65)`:``;
   const priority=getExPriority(ex.id);
   const last=getLastExSession(ex.id, ex.name);
   const suggested=getSuggestedWeight(last, ex.id, ex.name);
@@ -1676,7 +1718,7 @@ function renderExBlock(ex, idx) {
   }[priority];
 
   return `
-  <div class="exb" style="${allDone?`border-color:${planColor}55`:open?"border-color:rgba(255,255,255,.35);box-shadow:0 0 0 1px rgba(255,255,255,.1)":""}" id="ex-${ex.id}">
+  <div class="exb" style="${borderStyle}" id="ex-${ex.id}">
     <div class="exh" data-toggle-ex="${ex.id}">
       <div class="exnum${allDone?" done":""}">${allDone?"✓":(idx+1)}</div>
       <div class="exinfo">
@@ -1749,8 +1791,8 @@ function renderExBlock(ex, idx) {
     <!-- Today's sets -->
     <div style="margin:0 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">TODAY</div>
     <div class="sets-area">
-      <div class="sets-hdr"><div>SET</div><div>WEIGHT (lbs)</div><div>REPS</div><div>✓</div></div>
-      ${sets.map((set,si)=>`<div class="set-row"><div class="snum${set.done?" done":""}">${si+1}</div><input class="sinput" type="number" inputmode="decimal" placeholder="${suggested||"lbs"}" value="${set.weight}" data-sw="${ex.id}" data-si="${si}"><input class="sinput" type="number" inputmode="numeric" placeholder="${ex.reps}" value="${set.reps}" data-sr="${ex.id}" data-si="${si}"><div class="schk${set.done?" done":""}" data-cs2="${ex.id}" data-si="${si}">${set.done?"✓":"○"}</div><button data-del-set="${ex.id}" data-del-si="${si}" style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0">×</button></div>`).join("")}
+      <div class="sets-hdr"><div>SET</div><div>WEIGHT</div><div>REPS</div><div>✓</div><div></div></div>
+      ${sets.map((set,si)=>`<div class="set-row"><div class="snum${set.done?" done":""}">${si+1}</div><input class="sinput" type="number" inputmode="decimal" placeholder="${suggested||"lbs"}" value="${set.weight}" data-sw="${ex.id}" data-si="${si}"><input class="sinput" type="number" inputmode="numeric" placeholder="${ex.reps}" value="${set.reps}" data-sr="${ex.id}" data-si="${si}"><div class="schk${set.done?" done":""}" data-cs2="${ex.id}" data-si="${si}">${set.done?"✓":"○"}</div><button data-del-set="${ex.id}" data-del-si="${si}" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;padding:0 4px;line-height:1;flex-shrink:0;opacity:.6">×</button></div>`).join("")}
       <button class="add-set" data-add-set="${ex.id}">+ Add Set</button>
     </div>`:""}
   </div>`;
@@ -2753,7 +2795,7 @@ function renderHistory() {
   ${activeTab==="prs" ? `
     ${prs.length===0?`<div class="empty"><div class="empty-icon">🏆</div><div>Log your first workout to start tracking PRs!</div></div>`:`<div class="card" style="padding:0">${prs.map(([name,pr],i)=>`<div class="pr-item"><div class="pr-rank">${i<3?["🥇","🥈","🥉"][i]:(i+1)}</div><div class="pr-info"><div class="pr-name">${name}</div><div class="pr-date">${fmtDate(pr.date)} · ${PLAN[pr.dayId]?.label||pr.dayId}</div></div><div class="pr-wt"><div class="pr-lbs" style="color:${PLAN[pr.dayId]?.color||"#4f8ef7"}">${pr.weight}</div><div class="pr-unit">lbs</div></div></div>`).join("")}</div>`}
   ` : `
-    ${ST.workoutLogs.length===0?`<div class="empty"><div class="empty-icon">📅</div><div>Log your first workout to see history.</div></div>`:ST.workoutLogs.map(log=>{
+    ${ST.workoutLogs.length===0?`<div class="empty"><div class="empty-icon">📅</div><div>Log your first workout to see history.</div></div>`:[...ST.workoutLogs].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(log=>{
       const plan=PLAN[log.dayId]||{},open=ST.expandedLog===log.id,vol=getVolume(log),sets=(log.exercises||[]).reduce((t,e)=>t+(e.sets||[]).length,0);
       return`<div class="log-item">
         <div class="log-hdr" data-exp-log="${log.id}"><div class="log-dot" style="background:${plan.color||"#666"}"></div><div class="log-info"><div class="log-title">${plan.emoji||""} ${plan.title||log.dayId}</div><div class="log-date">${fmtDate(log.date)} · ${log.duration||"—"}</div></div><div style="color:var(--muted);font-size:18px;${open?"transform:rotate(180deg)":""}">⌄</div></div>
@@ -3051,9 +3093,21 @@ function attachAll() {
     if(newPg && ST["scroll_" + ST.tab]) newPg.scrollTop = ST["scroll_" + ST.tab];
   }));
 
+  // RESUME SESSION
+  $("[data-action='resume-day']")?.addEventListener("click",()=>{ST.showDayPicker=false;render();});
+
   // START DAY
   $$("[data-start-day]").forEach(el=>el.addEventListener("click",()=>{
-    ST.activeDay=el.dataset.startDay; ST.activeSets={}; ST.openEx={}; ST.openGuide={}; ST.tab="workout"; render();
+    const d=el.dataset.startDay;
+    // If tapping the in-progress day, just resume
+    if(ST.activeDay===d && ST.showDayPicker) { ST.showDayPicker=false; render(); return; }
+    // Starting a different day while one is in progress — warn
+    if(ST.activeDay && ST.activeDay!==d) {
+      const hasSets=Object.values(ST.activeSets).some(function(s){return s.some(function(set){return set.weight||set.reps;});});
+      if(hasSets && !confirm("You have an active "+PLAN[ST.activeDay]?.label+" session. Start a different day? Your current progress will be lost.")) return;
+    }
+    ST.activeDay=d; ST.activeSets={}; ST.openEx={}; ST.openGuide={}; ST.showDayPicker=false;
+    loadDefaultSets(d); saveWorkoutProgress(); render();
   }));
 
   // EXERCISE TOGGLE — surgical in-place update, never calls render()
@@ -3061,7 +3115,14 @@ function attachAll() {
     if(toggleGuide) {
       ST.openGuide[id] = !ST.openGuide[id];
     } else {
-      ST.openEx[id] = !ST.openEx[id];
+      var opening = !ST.openEx[id];
+      // Auto-collapse all other exercises when opening one
+      if(opening && ST.activeDay && PLAN[ST.activeDay]) {
+        PLAN[ST.activeDay].exercises.forEach(function(e) {
+          if(e.id !== id) ST.openEx[e.id] = false;
+        });
+      }
+      ST.openEx[id] = opening;
       if(!ST.openEx[id]) ST.openGuide[id] = false;
     }
     // Find the exercise in the plan
@@ -3093,10 +3154,10 @@ function attachAll() {
     });
     // Weight/rep inputs
     newBlock.querySelectorAll("[data-sw]").forEach(function(el){
-      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sw]) { ST.activeSets[el.dataset.sw][+el.dataset.si].weight=el.value; saveWorkoutProgress(); } });
+      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sw]) { ST.activeSets[el.dataset.sw][+el.dataset.si].weight=el.value; saveWorkoutProgress(); autoCheckSet(el.dataset.sw,+el.dataset.si); } });
     });
     newBlock.querySelectorAll("[data-sr]").forEach(function(el){
-      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sr]) { ST.activeSets[el.dataset.sr][+el.dataset.si].reps=el.value; saveWorkoutProgress(); } });
+      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sr]) { ST.activeSets[el.dataset.sr][+el.dataset.si].reps=el.value; saveWorkoutProgress(); autoCheckSet(el.dataset.sr,+el.dataset.si); } });
     });
     // Checkmark
     newBlock.querySelectorAll("[data-cs2]").forEach(function(el){
@@ -3162,10 +3223,18 @@ function attachAll() {
 
   // SET INPUTS — just update state in memory, don't re-render
   $$("[data-sw]").forEach(el=>el.addEventListener("input",()=>{
-    if(ST.activeSets[el.dataset.sw]) { ST.activeSets[el.dataset.sw][+el.dataset.si].weight=el.value; saveWorkoutProgress(); }
+    if(ST.activeSets[el.dataset.sw]) {
+      ST.activeSets[el.dataset.sw][+el.dataset.si].weight=el.value;
+      saveWorkoutProgress();
+      autoCheckSet(el.dataset.sw, +el.dataset.si);
+    }
   }));
   $$("[data-sr]").forEach(el=>el.addEventListener("input",()=>{
-    if(ST.activeSets[el.dataset.sr]) { ST.activeSets[el.dataset.sr][+el.dataset.si].reps=el.value; saveWorkoutProgress(); }
+    if(ST.activeSets[el.dataset.sr]) {
+      ST.activeSets[el.dataset.sr][+el.dataset.si].reps=el.value;
+      saveWorkoutProgress();
+      autoCheckSet(el.dataset.sr, +el.dataset.si);
+    }
   }));
 
   // COMPLETE SET
@@ -3275,6 +3344,11 @@ function attachAll() {
       setTimeout(function(){var inputs=newBlock.querySelectorAll(".sinput");if(inputs.length>=2){inputs[inputs.length-2].focus();}},50);
     }
   }));
+
+  // BACK TO PICKER — preserves workout data, just hides session view
+  $("[data-action='back-to-picker']")?.addEventListener("click",()=>{
+    ST.showDayPicker = true; render();
+  });
 
   // WORKOUT ACTIONS
   $$("[data-action='clear-day']").forEach(el=>el.addEventListener("click",()=>{ST.activeDay=null;ST.activeSets={};ST.openEx={};ST.openGuide={};clearWorkoutProgress();render();}));
@@ -4011,16 +4085,14 @@ function loadWorkoutProgress() {
     ST.activeDay = day;
     ST.activeSets = sets;
     ST.openEx = openEx || {};
-    // Auto-expand exercises that have partial progress (started but not all done)
+    ST.showDayPicker = false;
     var plan = PLAN[day];
     if(plan) {
       plan.exercises.forEach(function(ex) {
         var exSets = sets[ex.id] || [];
         var hasAny = exSets.some(function(s){ return s.weight || s.reps; });
         var allDone = exSets.length > 0 && exSets.every(function(s){ return s.done; });
-        // Expand if started but not fully done
         if(hasAny && !allDone) ST.openEx[ex.id] = true;
-        // Collapse if all done
         if(allDone) ST.openEx[ex.id] = false;
       });
     }
