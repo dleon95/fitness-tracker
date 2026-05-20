@@ -577,6 +577,7 @@ const ST = {
   foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""}, photoLookingUp: false,
   nutTab: "today",
   csFilter: "All", csSearch: "", csExpanded: null,
+  nutFoodQuery: "", // food calculator in calorie budget card
   aiLoading: false, aiTab: "latest", aiExpandedReport: null,
 };
 
@@ -906,6 +907,21 @@ Respond with ONLY the JSON, no other text.`
   }
 }
 // Get last N sessions for a specific exercise
+function getExSkipCount(exId, exName, dayId) {
+  // Get the last N logs for this specific day
+  var dayLogs = ST.workoutLogs.filter(function(l){ return l.dayId === dayId; }).slice(0, 4);
+  if(dayLogs.length === 0) return 0;
+  var consecutive = 0;
+  for(var i = 0; i < dayLogs.length; i++) {
+    var log = dayLogs[i];
+    var ex = (log.exercises||[]).find(function(e){ return e.id===exId || e.name===exName; });
+    var doneSets = ex ? (ex.sets||[]).filter(function(s){ return s.weight||s.reps; }) : [];
+    if(doneSets.length === 0) consecutive++;
+    else break; // stop at first session where it was done
+  }
+  return consecutive;
+}
+
 function getExHistory(exId, exName, n) {
   var history = [];
   for(var i = 0; i < ST.workoutLogs.length && history.length < n; i++) {
@@ -1057,6 +1073,35 @@ function getProgressionNote(last, exId, exName) {
 
   var phaseNote = trainingWeeks >= 13 ? " (slower phase)" : trainingWeeks >= 5 ? "" : " (newbie gains!)";
   return {text:`Add ${prog.amount}${prog.unit}${phaseNote}`, color:"var(--green)"};
+}
+
+function getExerciseTargetContext(exId, ex, last, suggested) {
+  // Bodyweight exercises — target is reps
+  var bw = ["pullup","pushup","hang_knee","ab_wheel","rev_crunch","dead_bug","plank_m","side_plank"];
+  if(bw.includes(exId)) {
+    var lastReps = last ? last.maxReps : null;
+    var targetReps = lastReps ? lastReps + 1 : null;
+    return {
+      targetStr: targetReps ? targetReps + " reps" : null,
+      contextStr: "Bodyweight · aim for " + (targetReps||"max") + " reps per set",
+      color: "#22c55e"
+    };
+  }
+  // Compound lifts
+  var compound = ["back_squat","bench","ohp","pullup","hip_thrust","bb_row","rdl_mon","rdl_thu","rdl_sat","leg_press","cable_row","lat_pull","db_row","chest_row","incline_db","lunge","bulgarian","goblet","db_rdl","sl_rdl"];
+  if(compound.includes(exId)) {
+    return {
+      targetStr: suggested ? suggested + " lbs" : null,
+      contextStr: suggested ? "All " + (ex.sets||3) + " sets at " + suggested + " lbs × " + (ex.reps||8) + " reps" : null,
+      color: "#4f8ef7"
+    };
+  }
+  // Isolation
+  return {
+    targetStr: suggested ? suggested + " lbs" : null,
+    contextStr: suggested ? "All " + (ex.sets||3) + " sets at " + suggested + " lbs (+2.5 lbs increments)" : null,
+    color: "#eab308"
+  };
 }
 
 function getExPriority(exId) {
@@ -1622,6 +1667,8 @@ function renderExBlock(ex, idx) {
   const last=getLastExSession(ex.id, ex.name);
   const suggested=getSuggestedWeight(last, ex.id, ex.name);
   const progNote=getProgressionNote(last, ex.id, ex.name);
+  const targetCtx=getExerciseTargetContext(ex.id, ex, last, suggested);
+  const skipCount=getExSkipCount(ex.id, ex.name, ST.activeDay);
   const priorityStyle={
     must:     {bg:"rgba(239,68,68,.15)",  color:"var(--red)",    label:"🔴 Must Do"},
     important:{bg:"rgba(234,179,8,.15)",  color:"var(--yellow)", label:"🟡 Important"},
@@ -1629,22 +1676,32 @@ function renderExBlock(ex, idx) {
   }[priority];
 
   return `
-  <div class="exb" style="${allDone?`border-color:${planColor}55`:""}" id="ex-${ex.id}">
+  <div class="exb" style="${allDone?`border-color:${planColor}55`:open?"border-color:rgba(255,255,255,.35);box-shadow:0 0 0 1px rgba(255,255,255,.1)":""}" id="ex-${ex.id}">
     <div class="exh" data-toggle-ex="${ex.id}">
       <div class="exnum${allDone?" done":""}">${allDone?"✓":(idx+1)}</div>
       <div class="exinfo">
         <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
           <div class="exname">${ex.name}</div>
           <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;background:${priorityStyle.bg};color:${priorityStyle.color}">${priorityStyle.label}</span>
+          ${skipCount>=2?`<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;background:rgba(239,68,68,.15);color:var(--red)">❗ Skipped ${skipCount}x</span>`:skipCount===1?`<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;background:rgba(249,115,22,.15);color:var(--orange)">⚠ Skipped last time</span>`:""}
         </div>
         <div class="exspec">${ex.sets}×${ex.reps} · <span data-tempo="${ex.tempo}" style="text-decoration:underline;text-decoration-style:dotted;cursor:pointer;color:var(--accent)">${ex.tempo}</span> · Rest ${ex.rest}${doneCount>0?` · <span style="color:var(--green)">${doneCount}/${sets.length} ✓</span>`:""}</div>
         <div style="font-size:11px;font-weight:700;color:var(--muted2);margin-top:3px">🎯 ${ex.muscles}</div>
-        ${last?`<div style="font-size:11px;color:var(--muted);margin-top:2px">
-          Last: <strong style="color:var(--text)">${last.maxWeight}lbs × ${last.maxReps} reps</strong> (${fmtDate(last.date)})
-          ${suggested?` · <strong style="color:${planColor}">Target: ${suggested}lbs</strong>`:""}
+        ${last ? `
+        <!-- Last session compact strip (always visible) -->
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">
+          Last ${fmtDate(last.date)}: <span style="color:var(--text);font-weight:600">${(last.allSets||[]).map(s=>(s.weight?s.weight+"×":"")+s.reps).join(" · ")}</span>
         </div>
+        <!-- Target line (always visible) -->
+        ${targetCtx.targetStr?`<div style="margin-top:4px;display:flex;align-items:center;gap:6px">
+          <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">🎯</span>
+          <span style="font-weight:700;font-size:12px;color:${targetCtx.color}">${targetCtx.targetStr}</span>
+          <span style="font-size:11px;color:var(--muted)">· ${targetCtx.contextStr}</span>
+        </div>`:""}
+        ` : `
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">No previous data — establish your baseline today</div>
+        ${targetCtx.contextStr?`<div style="font-size:11px;color:var(--muted);margin-top:2px">🎯 ${targetCtx.contextStr}</div>`:""}`}
         ${progNote?`<div style="font-size:11px;font-weight:600;color:${progNote.color};margin-top:2px">→ ${progNote.text}</div>`:""}
-        `:`<div style="font-size:11px;color:var(--muted);margin-top:2px">No previous data — establish your baseline today</div>`}
       </div>
       <div class="exarr${open?" open":""}">⌄</div>
     </div>
@@ -1657,9 +1714,43 @@ function renderExBlock(ex, idx) {
       <div class="fg-sec"><div class="fg-ttl">Common Mistakes</div>${(ex.mistakes||[]).map(m=>`<div class="fg-err"><div class="fg-x">✗</div><div>${m}</div></div>`).join("")}</div>
       <div class="fg-tip">⭐ ${ex.proTip}</div>
     </div></div>`:""}
+
+    ${last && last.allSets && last.allSets.length > 0 ? `
+    <!-- Last session table -->
+    <div style="margin:0 14px 10px;border-radius:var(--rs);overflow:hidden;border:1px solid var(--border)">
+      <div style="background:var(--bg3);padding:6px 12px;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between">
+        <span>LAST SESSION — ${fmtDate(last.date)}</span>
+        <span style="color:var(--muted)">${last.allSets.length} sets</span>
+      </div>
+      ${last.allSets.map(function(s,i){
+        var isTop = parseFloat(s.weight||0) === last.maxWeight && last.maxWeight > 0;
+        return `<div style="display:flex;align-items:center;padding:6px 12px;border-top:1px solid var(--border);background:${isTop?"rgba(79,142,247,.05)":"transparent"}">
+          <div style="font-size:11px;color:var(--muted);width:36px">Set ${i+1}</div>
+          <div style="font-weight:${isTop?"700":"500"};font-size:13px;flex:1;color:${isTop?"var(--accent)":"var(--text)"}">
+            ${s.weight?s.weight+" lbs":"BW"}
+          </div>
+          <div style="font-size:13px;color:var(--muted);width:52px;text-align:right">${s.reps||"—"} reps</div>
+          ${isTop?`<div style="font-size:9px;font-weight:700;color:var(--accent);margin-left:8px;background:rgba(79,142,247,.15);padding:2px 6px;border-radius:99px">TOP</div>`:`<div style="width:44px"></div>`}
+        </div>`;
+      }).join("")}
+    </div>` : ""}
+
+    <!-- Target directive -->
+    ${targetCtx.targetStr ? `
+    <div style="margin:0 14px 10px;background:rgba(${targetCtx.color==="#4f8ef7"?"79,142,247":targetCtx.color==="#22c55e"?"34,197,94":"234,179,8"},.08);border:1px solid rgba(${targetCtx.color==="#4f8ef7"?"79,142,247":targetCtx.color==="#22c55e"?"34,197,94":"234,179,8"},.25);border-radius:var(--rs);padding:10px 12px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)">🎯 Target</span>
+        <span style="font-family:var(--font-d);font-size:20px;color:${targetCtx.color}">${targetCtx.targetStr}</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">${targetCtx.contextStr}</div>
+      ${last ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;font-style:italic">Warm up with lighter sets before hitting working weight</div>` : ""}
+    </div>` : ""}
+
+    <!-- Today's sets -->
+    <div style="margin:0 14px 4px;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">TODAY</div>
     <div class="sets-area">
       <div class="sets-hdr"><div>SET</div><div>WEIGHT (lbs)</div><div>REPS</div><div>✓</div></div>
-      ${sets.map((set,si)=>`<div class="set-row"><div class="snum${set.done?" done":""}">${si+1}</div><input class="sinput" type="number" inputmode="decimal" placeholder="${suggested||"lbs"}" value="${set.weight}" data-sw="${ex.id}" data-si="${si}"><input class="sinput" type="number" inputmode="numeric" placeholder="${ex.reps}" value="${set.reps}" data-sr="${ex.id}" data-si="${si}"><div class="schk${set.done?" done":""}" data-cs2="${ex.id}" data-si="${si}">${set.done?"✓":"○"}</div></div>`).join("")}
+      ${sets.map((set,si)=>`<div class="set-row"><div class="snum${set.done?" done":""}">${si+1}</div><input class="sinput" type="number" inputmode="decimal" placeholder="${suggested||"lbs"}" value="${set.weight}" data-sw="${ex.id}" data-si="${si}"><input class="sinput" type="number" inputmode="numeric" placeholder="${ex.reps}" value="${set.reps}" data-sr="${ex.id}" data-si="${si}"><div class="schk${set.done?" done":""}" data-cs2="${ex.id}" data-si="${si}">${set.done?"✓":"○"}</div><button data-del-set="${ex.id}" data-del-si="${si}" style="background:none;border:none;color:var(--muted);font-size:16px;cursor:pointer;padding:0 2px;line-height:1;flex-shrink:0">×</button></div>`).join("")}
       <button class="add-set" data-add-set="${ex.id}">+ Add Set</button>
     </div>`:""}
   </div>`;
@@ -1775,6 +1866,47 @@ function renderNutToday(sum, entries, water, filled) {
         ` : `
           <div style="font-size:12px;color:var(--muted);text-align:center;padding:8px 0">Almost there — on track! 🎯</div>
         `}
+
+        <!-- Food calculator -->
+        <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
+          <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">🔍 How much can I eat?</div>
+          <div style="position:relative">
+            <input id="nut-food-query" class="finput" placeholder="Type a food (e.g. ceviche, chicharrón…)" value="${ST.nutFoodQuery||""}" autocomplete="off" style="margin-bottom:0">
+          </div>
+          ${(()=>{
+            var q = ST.nutFoodQuery;
+            if(!q || q.length < 2) return '<div style="font-size:11px;color:var(--muted);margin-top:6px">Type a food to see how much you can eat to close your gaps</div>';
+            var matches = searchFoods(q).slice(0,4);
+            if(matches.length === 0) return '<div style="font-size:11px;color:var(--muted);margin-top:6px">No match — try a different name</div>';
+            return '<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">' + matches.map(function(f){
+              var calRemaining = Math.max(0, remaining);
+              var pRemaining = Math.max(0, pLeft);
+              // Max grams based on calories
+              var maxByCalories = calRemaining > 0 ? Math.floor(calRemaining / (f.cal/100)) : 999;
+              // Grams needed to close protein gap
+              var gramsForProtein = f.p > 0 ? Math.ceil(pRemaining / (f.p/100)) : null;
+              // Ideal: close protein gap without exceeding calories
+              var idealGrams = gramsForProtein || maxByCalories;
+              var idealCal = Math.round(idealGrams * f.cal / 100);
+              var idealP = Math.round(idealGrams * f.p / 100);
+              var overCal = idealCal > calRemaining;
+              // If protein portion exceeds calorie budget, show max by calories too
+              var altGrams = overCal ? maxByCalories : null;
+              var altCal = altGrams ? Math.round(altGrams * f.cal / 100) : 0;
+              var altP = altGrams ? Math.round(altGrams * f.p / 100) : 0;
+              return `<div style="background:var(--bg3);border-radius:var(--rs);padding:10px 12px;border:1px solid ${overCal?"rgba(249,115,22,.3)":"rgba(34,197,94,.2)"}">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+                  <div style="font-weight:700;font-size:13px">${f.n}</div>
+                  <div style="font-family:var(--font-d);font-size:22px;color:${overCal?"var(--orange)":"var(--green)"}">${idealGrams}g</div>
+                </div>
+                <div style="font-size:11px;color:var(--muted)">
+                  ${idealCal} kcal · +${idealP}g protein · ${overCal?`<span style="color:var(--orange)">⚠ ${idealCal-calRemaining} kcal over budget</span>`:`<span style="color:var(--green)">fits budget ✓</span>`}
+                </div>
+                ${overCal && altGrams ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">Or stay in budget: <strong>${altGrams}g</strong> (${altCal} kcal · +${altP}g protein)</div>` : ""}
+              </div>`;
+            }).join("") + "</div>";
+          })()}
+        </div>
       `;
     })()}
   </div>
@@ -2956,6 +3088,9 @@ function attachAll() {
     // Toggle guide
     var guide = newBlock.querySelector("[data-toggle-guide]");
     if(guide) guide.addEventListener("click", function(e){ e.stopPropagation(); toggleExBlock(id, true); });
+    newBlock.querySelectorAll("[data-del-set]").forEach(function(btn){
+      btn.addEventListener("click",function(e){ e.stopPropagation(); var eid2=btn.dataset.delSet,si2=+btn.dataset.delSi; if(ST.activeSets[eid2]&&ST.activeSets[eid2].length>1){ST.activeSets[eid2].splice(si2,1);ST.openEx[eid2]=true;saveWorkoutProgress();toggleExBlock(eid2,false);}});
+    });
     // Weight/rep inputs
     newBlock.querySelectorAll("[data-sw]").forEach(function(el){
       el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sw]) { ST.activeSets[el.dataset.sw][+el.dataset.si].weight=el.value; saveWorkoutProgress(); } });
@@ -3080,12 +3215,65 @@ function attachAll() {
     }
   }));
 
-  // ADD SET — surgical: re-render just that exercise block
-  $$("[data-add-set]").forEach(el=>el.addEventListener("click",()=>{
+  // DELETE SET
+  $$("[data-del-set]").forEach(el=>el.addEventListener("click",e=>{
+    e.stopPropagation();
+    const eid=el.dataset.delSet, si=+el.dataset.delSi;
+    if(ST.activeSets[eid] && ST.activeSets[eid].length > 1) {
+      ST.activeSets[eid].splice(si,1);
+      ST.openEx[eid]=true;
+      saveWorkoutProgress();
+      toggleExBlock(eid,false);
+    }
+  }));
+
+  // ADD SET — surgical: add set and re-render block keeping it open
+  $$("[data-add-set]").forEach(el=>el.addEventListener("click",e=>{
+    e.stopPropagation();
     const eid=el.dataset.addSet;
     if(!ST.activeSets[eid]) ST.activeSets[eid]=[];
     ST.activeSets[eid].push({weight:"",reps:"",done:false});
-    toggleExBlock(eid, false);
+    ST.openEx[eid]=true; // ensure stays open
+    saveWorkoutProgress();
+    // Re-render just this block
+    const exEl=document.getElementById("ex-"+eid);
+    if(!exEl) return;
+    var planEx=null, planIdx=0;
+    if(ST.activeDay&&PLAN[ST.activeDay]) PLAN[ST.activeDay].exercises.forEach(function(e,i){if(e.id===eid){planEx=e;planIdx=i;}});
+    if(!planEx) return;
+    var temp=document.createElement("div");
+    temp.innerHTML=renderExBlock(planEx,planIdx);
+    var newEl=temp.firstElementChild;
+    exEl.parentNode.replaceChild(newEl,exEl);
+    // Re-attach listeners for the new block
+    var newBlock=document.getElementById("ex-"+eid);
+    if(newBlock) {
+      var hdr=newBlock.querySelector("[data-toggle-ex]");
+      if(hdr) hdr.addEventListener("click",function(){toggleExBlock(eid,false);});
+      var guide=newBlock.querySelector("[data-toggle-guide]");
+      if(guide) guide.addEventListener("click",function(e2){e2.stopPropagation();toggleExBlock(eid,true);});
+      newBlock.querySelectorAll("[data-sw]").forEach(function(inp){inp.addEventListener("input",function(){if(ST.activeSets[inp.dataset.sw])ST.activeSets[inp.dataset.sw][+inp.dataset.si].weight=inp.value;saveWorkoutProgress();});});
+      newBlock.querySelectorAll("[data-sr]").forEach(function(inp){inp.addEventListener("input",function(){if(ST.activeSets[inp.dataset.sr])ST.activeSets[inp.dataset.sr][+inp.dataset.si].reps=inp.value;saveWorkoutProgress();});});
+      newBlock.querySelectorAll("[data-cs2]").forEach(function(chk){
+        chk.addEventListener("click",function(){
+          var eid2=chk.dataset.cs2,si=+chk.dataset.si;
+          if(!ST.activeSets[eid2]) return;
+          ST.activeSets[eid2][si].done=!ST.activeSets[eid2][si].done;
+          if(ST.activeSets[eid2][si].done){var exPlan=PLAN[ST.activeDay]?.exercises.find(function(e){return e.id===eid2;});if(exPlan)startTimer(exPlan.rest);}
+          chk.className="schk"+(ST.activeSets[eid2][si].done?" done":"");
+          chk.textContent=ST.activeSets[eid2][si].done?"✓":"○";
+          var row=chk.closest(".set-row");if(row){var sn=row.querySelector(".snum");if(sn)sn.className="snum"+(ST.activeSets[eid2][si].done?" done":"");}
+          var allSets=ST.activeSets[eid2]||[],allDone=allSets.length>0&&allSets.every(function(s){return s.done;});
+          var exBlock=document.getElementById("ex-"+eid2);if(exBlock)exBlock.style.borderColor=allDone?(PLAN[ST.activeDay]?.color||"#4f8ef7")+"55":"";
+          saveWorkoutProgress();
+          if(allDone){ST.openEx[eid2]=false;setTimeout(function(){var block=document.getElementById("ex-"+eid2);if(!block)return;var pEx=null,pIdx=0;if(ST.activeDay&&PLAN[ST.activeDay])PLAN[ST.activeDay].exercises.forEach(function(e,i){if(e.id===eid2){pEx=e;pIdx=i;}});if(!pEx)return;var t=document.createElement("div");t.innerHTML=renderExBlock(pEx,pIdx);var ne=t.firstElementChild;if(ne&&block.parentNode){block.parentNode.replaceChild(ne,block);var h=ne.querySelector("[data-toggle-ex]");if(h)h.addEventListener("click",function(){toggleExBlock(eid2,false);});}},500);}
+        });
+      });
+      var addBtn=newBlock.querySelector("[data-add-set]");
+      if(addBtn) addBtn.addEventListener("click",function(e2){e2.stopPropagation();var eid2=addBtn.dataset.addSet;if(!ST.activeSets[eid2])ST.activeSets[eid2]=[];ST.activeSets[eid2].push({weight:"",reps:"",done:false});ST.openEx[eid2]=true;saveWorkoutProgress();var bl=document.getElementById("ex-"+eid2);if(bl){var pe=null,pi=0;if(ST.activeDay&&PLAN[ST.activeDay])PLAN[ST.activeDay].exercises.forEach(function(e,i){if(e.id===eid2){pe=e;pi=i;}});if(pe){var tmp=document.createElement("div");tmp.innerHTML=renderExBlock(pe,pi);var ne=tmp.firstElementChild;bl.parentNode.replaceChild(ne,bl);var h=ne.querySelector("[data-toggle-ex]");if(h)h.addEventListener("click",function(){toggleExBlock(eid2,false);});}}});
+      // Focus last weight input
+      setTimeout(function(){var inputs=newBlock.querySelectorAll(".sinput");if(inputs.length>=2){inputs[inputs.length-2].focus();}},50);
+    }
   }));
 
   // WORKOUT ACTIONS
@@ -3196,17 +3384,21 @@ function attachAll() {
     var log=ST.nutritionLogs.find(function(l){return l.date===date&&l.type==="water";});
     if(log){ log.liters=Math.max(0,Math.round((log.liters+amt)*100)/100); saveWaterLog(log); }
     else if(amt>0){ var nl={id:date+"_water",date:date,type:"water",liters:amt}; ST.nutritionLogs.unshift(nl); saveWaterLog(nl); }
-    render();
+    var pg=document.getElementById("pg"); var sy=pg?pg.scrollTop:0;
+    render(); if(pg)pg.scrollTop=sy;
   }));
   $$("[data-day-steps]").forEach(el=>el.addEventListener("click",()=>{
     var date=el.dataset.day, amt=parseInt(el.dataset.daySteps);
     upsertDailyLog(date,{steps:Math.max(0,(getDailyLog(date)?.steps||0)+amt), sleep_hours:getDailyLog(date)?.sleep_hours||0});
-    render();
+    var pg=document.getElementById("pg"); var sy=pg?pg.scrollTop:0;
+    render(); if(pg)pg.scrollTop=sy;
   }));
 
   // WEEK DAY SELECTION (This Week tab)
   $$("[data-week-day]").forEach(el=>el.addEventListener("click",()=>{
+    var pg=document.getElementById("pg"); var sy=pg?pg.scrollTop:0;
     ST.weekDay=el.dataset.weekDay; render();
+    if(pg)pg.scrollTop=sy;
   }));
 
   // OPEN FOOD MODAL FOR A SPECIFIC DAY (This Week view)
@@ -3217,8 +3409,21 @@ function attachAll() {
     setTimeout(()=>document.getElementById("food-search-input")?.focus(),100);
   }));
 
+  // NUT FOOD CALCULATOR
+  var nfqEl = document.getElementById("nut-food-query");
+  if(nfqEl) nfqEl.addEventListener("input", function(){
+    ST.nutFoodQuery = nfqEl.value;
+    // Re-render just the calorie budget card
+    var pg=document.getElementById("pg"); var sy=pg?pg.scrollTop:0;
+    render(); if(pg)pg.scrollTop=sy;
+  });
+
   // NUTRITION TAB
-  $$("[data-nut-tab]").forEach(el=>el.addEventListener("click",()=>{ST.nutTab=el.dataset.nutTab;render();}));
+  $$("[data-nut-tab]").forEach(el=>el.addEventListener("click",()=>{
+    var pg=document.getElementById("pg"); var sy=pg?pg.scrollTop:0;
+    ST.nutTab=el.dataset.nutTab; render();
+    if(pg)pg.scrollTop=sy;
+  }));
 
   // CHEAT SHEET FILTER PILLS
   $$("[data-cs-filter]").forEach(el=>el.addEventListener("click",()=>{
