@@ -570,7 +570,7 @@ const ST = {
   chartRangeMeas: 28,
   charts: {},
   workoutView: "plan",
-  activeDay: null, activeSets: {}, openEx: {}, openGuide: {}, showDayPicker: false,
+  activeDay: null, activeSets: {}, openEx: {}, openGuide: {}, showDayPicker: false, extraExercises: [], exSearchQ: "",
   restTimer: null,
   showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]}, breakdown: null,
   expandedLog: null,
@@ -1789,9 +1789,135 @@ function renderDayPicker() {
 }
 
 // ── WORKOUT SESSION ────────────────────────────────
+// Full exercise library for search — plan exercises + common extras
+const EXERCISE_LIBRARY = [
+  // From plan
+  {id:"back_squat",name:"Back Squat",muscle:"Quads/Glutes",type:"compound"},
+  {id:"rdl_mon",name:"Romanian Deadlift",muscle:"Hamstrings",type:"compound"},
+  {id:"bulgarian",name:"Bulgarian Split Squat",muscle:"Quads/Glutes",type:"compound"},
+  {id:"leg_press",name:"Leg Press",muscle:"Quads",type:"compound"},
+  {id:"leg_ext",name:"Leg Extension",muscle:"Quads",type:"isolation"},
+  {id:"stand_calf",name:"Standing Calf Raise",muscle:"Calves",type:"isolation"},
+  {id:"plank_m",name:"Plank",muscle:"Core",type:"bodyweight"},
+  {id:"dead_bug",name:"Dead Bug",muscle:"Core",type:"bodyweight"},
+  {id:"bench",name:"Bench Press",muscle:"Chest",type:"compound"},
+  {id:"ohp",name:"Overhead Press",muscle:"Shoulders",type:"compound"},
+  {id:"incline_db",name:"Incline DB Press",muscle:"Chest",type:"compound"},
+  {id:"cable_fly",name:"Cable Fly",muscle:"Chest",type:"isolation"},
+  {id:"lat_raise",name:"Lateral Raise",muscle:"Shoulders",type:"isolation"},
+  {id:"face_pull_t",name:"Face Pull",muscle:"Rear Delts",type:"isolation"},
+  {id:"tri_push",name:"Tricep Pushdown",muscle:"Triceps",type:"isolation"},
+  {id:"bike",name:"Stationary Bike",muscle:"Cardio",type:"cardio"},
+  {id:"hang_knee",name:"Hanging Knee Raise",muscle:"Core",type:"bodyweight"},
+  {id:"woodchop",name:"Cable Woodchop",muscle:"Core",type:"isolation"},
+  {id:"side_plank",name:"Side Plank",muscle:"Core",type:"bodyweight"},
+  {id:"ab_wheel",name:"Ab Wheel",muscle:"Core",type:"bodyweight"},
+  {id:"rev_crunch",name:"Reverse Crunch",muscle:"Core",type:"bodyweight"},
+  {id:"hip_thrust",name:"Hip Thrust",muscle:"Glutes",type:"compound"},
+  {id:"rdl_thu",name:"RDL (Thursday)",muscle:"Hamstrings",type:"compound"},
+  {id:"lunge",name:"Walking Lunge",muscle:"Quads/Glutes",type:"compound"},
+  {id:"leg_curl",name:"Leg Curl",muscle:"Hamstrings",type:"isolation"},
+  {id:"pull_thru",name:"Cable Pull-Through",muscle:"Glutes",type:"isolation"},
+  {id:"sl_rdl",name:"Single-Leg RDL",muscle:"Hamstrings",type:"compound"},
+  {id:"seat_calf",name:"Seated Calf Raise",muscle:"Calves",type:"isolation"},
+  {id:"cable_crunch",name:"Cable Crunch",muscle:"Core",type:"isolation"},
+  {id:"pullup",name:"Pull-Up",muscle:"Back/Biceps",type:"bodyweight"},
+  {id:"bb_row",name:"Barbell Row",muscle:"Back",type:"compound"},
+  {id:"cable_row",name:"Seated Cable Row",muscle:"Back",type:"compound"},
+  {id:"db_row",name:"DB Row",muscle:"Back",type:"compound"},
+  {id:"lat_pull",name:"Lat Pulldown",muscle:"Back",type:"compound"},
+  {id:"ez_curl",name:"EZ Bar Curl",muscle:"Biceps",type:"isolation"},
+  {id:"hammer",name:"Hammer Curl",muscle:"Biceps",type:"isolation"},
+  {id:"incline_curl",name:"Incline DB Curl",muscle:"Biceps",type:"isolation"},
+  {id:"goblet",name:"Goblet Squat",muscle:"Quads",type:"compound"},
+  {id:"db_rdl",name:"DB RDL",muscle:"Hamstrings",type:"compound"},
+  {id:"pushup",name:"Push-Up",muscle:"Chest",type:"bodyweight"},
+  {id:"chest_row",name:"Chest-Supported Row",muscle:"Back",type:"compound"},
+  {id:"ez_super",name:"EZ Bar + Skull Crusher",muscle:"Triceps/Biceps",type:"isolation"},
+  {id:"cable_super",name:"Cable Superset",muscle:"Arms",type:"isolation"},
+  {id:"lat_fin",name:"Lateral Raise Finisher",muscle:"Shoulders",type:"isolation"},
+  {id:"oh_tri",name:"Overhead Tricep Extension",muscle:"Triceps",type:"isolation"},
+  {id:"face_pull_f",name:"Face Pull (Friday)",muscle:"Rear Delts",type:"isolation"},
+  // Extra common exercises not in plan
+  {id:"deadlift",name:"Conventional Deadlift",muscle:"Back/Hamstrings",type:"compound"},
+  {id:"sumo_dl",name:"Sumo Deadlift",muscle:"Glutes/Hamstrings",type:"compound"},
+  {id:"hack_squat",name:"Hack Squat",muscle:"Quads",type:"compound"},
+  {id:"chest_press_m",name:"Chest Press Machine",muscle:"Chest",type:"compound"},
+  {id:"shoulder_press_m",name:"Shoulder Press Machine",muscle:"Shoulders",type:"compound"},
+  {id:"pec_deck",name:"Pec Deck",muscle:"Chest",type:"isolation"},
+  {id:"rear_delt_fly",name:"Rear Delt Fly",muscle:"Rear Delts",type:"isolation"},
+  {id:"upright_row",name:"Upright Row",muscle:"Shoulders",type:"compound"},
+  {id:"shrug",name:"Barbell Shrug",muscle:"Traps",type:"isolation"},
+  {id:"tricep_dip",name:"Tricep Dip",muscle:"Triceps",type:"bodyweight"},
+  {id:"chin_up",name:"Chin-Up",muscle:"Back/Biceps",type:"bodyweight"},
+  {id:"inverted_row",name:"Inverted Row",muscle:"Back",type:"bodyweight"},
+  {id:"box_jump",name:"Box Jump",muscle:"Quads/Glutes",type:"cardio"},
+  {id:"jump_rope",name:"Jump Rope",muscle:"Cardio",type:"cardio"},
+  {id:"treadmill",name:"Treadmill",muscle:"Cardio",type:"cardio"},
+  {id:"elliptical",name:"Elliptical",muscle:"Cardio",type:"cardio"},
+  {id:"swimming",name:"Swimming",muscle:"Cardio",type:"cardio"},
+  {id:"donkey_calf",name:"Donkey Calf Raise",muscle:"Calves",type:"isolation"},
+  {id:"calf_press",name:"Calf Press (Leg Press)",muscle:"Calves",type:"isolation"},
+  {id:"tibialis_raise",name:"Tibialis Raise",muscle:"Shins",type:"isolation"},
+  {id:"hip_abduct",name:"Hip Abduction",muscle:"Glutes",type:"isolation"},
+  {id:"hip_adduct",name:"Hip Adduction",muscle:"Inner Thigh",type:"isolation"},
+  {id:"nordic_curl",name:"Nordic Curl",muscle:"Hamstrings",type:"bodyweight"},
+  {id:"glute_kickback",name:"Glute Kickback",muscle:"Glutes",type:"isolation"},
+  {id:"russian_twist",name:"Russian Twist",muscle:"Core",type:"bodyweight"},
+  {id:"mountain_climber",name:"Mountain Climber",muscle:"Core/Cardio",type:"bodyweight"},
+  {id:"sit_up",name:"Sit-Up",muscle:"Core",type:"bodyweight"},
+  {id:"leg_raise",name:"Leg Raise",muscle:"Core",type:"bodyweight"},
+  {id:"dragon_flag",name:"Dragon Flag",muscle:"Core",type:"bodyweight"},
+];
+
+function addExerciseToSession(dataStr) {
+  try {
+    var ex = JSON.parse(dataStr.replace(/&#39;/g,"'"));
+    if(!ST.extraExercises) ST.extraExercises = [];
+    // Don't add if already in plan or extras
+    var allIds = (PLAN[ST.activeDay]?.exercises||[]).concat(ST.extraExercises).map(function(e){return e.id;});
+    if(allIds.includes(ex.id)) return;
+    // Create exercise object compatible with renderExBlock
+    var newEx = {
+      id: ex.id, name: ex.name, sets: 3, reps: "8-12",
+      tempo: "2-0-1", rest: "60s",
+      muscles: [ex.muscle], steps: [], mistakes: [], proTip: "Focus on form and controlled movement."
+    };
+    ST.extraExercises.push(newEx);
+    ST.activeSets[ex.id] = [{weight:"",reps:"",done:false},{weight:"",reps:"",done:false},{weight:"",reps:"",done:false}];
+    ST.openEx[ex.id] = true; // auto-open the new exercise
+    ST.exSearchQ = ""; // clear search
+    saveWorkoutProgress();
+    render();
+    // Scroll to the new exercise
+    setTimeout(function(){
+      var el = document.getElementById("ex-"+ex.id);
+      if(el) el.scrollIntoView({behavior:"smooth", block:"nearest"});
+    }, 100);
+  } catch(e) { console.log("addExerciseToSession error:", e); }
+}
+
+function searchExercises(q) {
+  if(!q || q.length < 1) return [];
+  var ql = q.toLowerCase();
+  return EXERCISE_LIBRARY.filter(function(e){
+    return e.name.toLowerCase().includes(ql) || e.muscle.toLowerCase().includes(ql) || e.id.includes(ql);
+  }).slice(0,8);
+}
+
 function renderWorkoutSession() {
   const plan = PLAN[ST.activeDay];
   plan.exercises.forEach(ex => { if(!ST.activeSets[ex.id]) ST.activeSets[ex.id] = Array.from({length:ex.sets},()=>({weight:"",reps:"",done:false})); });
+
+  // Build full exercise list: plan exercises + any extras added this session
+  const extraExercises = ST.extraExercises || [];
+  const allExercises = plan.exercises.concat(extraExercises);
+
+  // Exercise search results
+  const exSearchQ = ST.exSearchQ || "";
+  const exSearchResults = searchExercises(exSearchQ);
+  const alreadyAdded = allExercises.map(function(e){return e.id;});
+
   return `
   <div style="padding:52px 20px 14px;position:sticky;top:0;background:rgba(10,10,15,.97);backdrop-filter:blur(20px);z-index:10;border-bottom:1px solid var(--border)">
     <div style="display:flex;align-items:center;gap:10px">
@@ -1802,8 +1928,28 @@ function renderWorkoutSession() {
     <div style="font-size:12px;color:var(--muted);margin-top:4px">${plan.duration} · ${plan.muscles}</div>
   </div>
   <div style="height:12px"></div>
-  ${plan.exercises.map((ex,i)=>renderExBlock(ex,i)).join("")}
-  <div style="height:150px"></div>
+  ${allExercises.map((ex,i)=>renderExBlock(ex,i)).join("")}
+
+  <!-- Add Exercise Search -->
+  <div style="margin:8px 16px 160px;background:var(--bg2);border:1px dashed var(--border);border-radius:var(--r);padding:12px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">+ Add Exercise</div>
+    <input id="ex-search-input" class="finput" placeholder="Search by name or muscle (e.g. calf, bicep)…" value="${exSearchQ}" autocomplete="off" style="margin-bottom:0">
+    <div id="ex-search-results" style="margin-top:4px">
+      ${exSearchResults.length > 0 ? `<div class="fsr">${exSearchResults.map(e => {
+        const added = alreadyAdded.includes(e.id);
+        return `<div class="ex-add-item${added?" ex-added":""}" data-add-ex='${JSON.stringify(e).replace(/'/g,"&#39;")}' style="padding:8px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);${added?"opacity:.4;pointer-events:none":"cursor:pointer"}">
+          <div>
+            <div style="font-weight:600;font-size:13px">${e.name}</div>
+            <div style="font-size:11px;color:var(--muted)">${e.muscle} · ${e.type}</div>
+          </div>
+          <div style="font-size:12px;font-weight:700;color:${added?"var(--muted)":"var(--accent)"}">
+            ${added?"Added":"+ Add"}
+          </div>
+        </div>`;
+      }).join("")}</div>` : exSearchQ.length >= 1 ? `<div style="padding:8px;font-size:12px;color:var(--muted)">No matches — try a different name or muscle group</div>` : ""}
+    </div>
+  </div>
+
   <div class="wact">
     <button class="btn bg" style="flex:1" data-action="clear-day">Cancel</button>
     <button class="btn bp" style="flex:2" data-action="finish-workout">💾 Save Workout</button>
@@ -2156,32 +2302,36 @@ function renderNutWeek() {
       const dayLog = ST.dailyLogs.find(function(l){return l.date===selectedDay;})||{steps:0,sleep_hours:0};
       const w = selWater ? selWater.liters : 0;
       const sl = dayLog.sleep_hours||0;
-      return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
-        <div style="background:var(--bg3);border-radius:var(--rs);padding:10px">
-          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">💧 Water</div>
-          <div style="font-family:var(--font-d);font-size:20px;color:#06b6d4;margin-bottom:6px">${w.toFixed(1)}L</div>
-          <div style="display:flex;gap:3px">
-            <button class="btn bg" style="flex:1;padding:4px;font-size:11px" data-day-water="-0.25" data-day="${selectedDay}">-¼</button>
-            <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-water="0.25" data-day="${selectedDay}">+¼</button>
-            <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-water="0.5" data-day="${selectedDay}">+½</button>
+      return `<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div style="background:var(--bg3);border-radius:var(--rs);padding:10px">
+            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">💧 Water</div>
+            <div style="font-family:var(--font-d);font-size:20px;color:#06b6d4;margin-bottom:6px">${w.toFixed(1)}L</div>
+            <div style="display:flex;gap:3px">
+              <button class="btn bg" style="flex:1;padding:4px;font-size:11px" data-day-water="-0.25" data-day="${selectedDay}">-¼</button>
+              <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-water="0.25" data-day="${selectedDay}">+¼</button>
+              <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-water="0.5" data-day="${selectedDay}">+½</button>
+            </div>
           </div>
-        </div>
-        <div style="background:var(--bg3);border-radius:var(--rs);padding:10px">
-          <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">👟 Steps</div>
-          <div style="font-family:var(--font-d);font-size:20px;color:#22c55e;margin-bottom:6px">${(dayLog.steps||0).toLocaleString()}</div>
-          <div style="display:flex;gap:3px">
-            <button class="btn bg" style="flex:1;padding:4px;font-size:11px" data-day-steps="-250" data-day="${selectedDay}">-250</button>
-            <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-steps="250" data-day="${selectedDay}">+250</button>
-            <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-steps="500" data-day="${selectedDay}">+500</button>
+          <div style="background:var(--bg3);border-radius:var(--rs);padding:10px">
+            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">👟 Steps</div>
+            <div style="font-family:var(--font-d);font-size:20px;color:#22c55e;margin-bottom:6px">${(dayLog.steps||0).toLocaleString()}</div>
+            <div style="display:flex;gap:3px">
+              <button class="btn bg" style="flex:1;padding:4px;font-size:11px" data-day-steps="-250" data-day="${selectedDay}">-250</button>
+              <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-steps="250" data-day="${selectedDay}">+250</button>
+              <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-steps="500" data-day="${selectedDay}">+500</button>
+            </div>
           </div>
         </div>
         <div style="background:var(--bg3);border-radius:var(--rs);padding:10px">
           <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">😴 Sleep</div>
-          <div style="font-family:var(--font-d);font-size:20px;color:#a78bfa;margin-bottom:6px">${sl > 0 ? sl+"h" : "—"}</div>
-          <div style="display:flex;gap:3px">
-            <button class="btn bg" style="flex:1;padding:4px;font-size:11px" data-day-sleep="-0.25" data-day="${selectedDay}">-15m</button>
-            <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-sleep="0.25" data-day="${selectedDay}">+15m</button>
-            <button class="btn bp" style="flex:1;padding:4px;font-size:11px" data-day-sleep="1" data-day="${selectedDay}">+1h</button>
+          <div style="display:flex;align-items:center;gap:12px">
+            <div style="font-family:var(--font-d);font-size:24px;color:#a78bfa;min-width:48px">${sl > 0 ? sl+"h" : "—"}</div>
+            <div style="display:flex;gap:6px;flex:1">
+              <button class="btn bg" style="flex:1;padding:8px 4px;font-size:12px" data-day-sleep="-0.25" data-day="${selectedDay}">-15m</button>
+              <button class="btn bp" style="flex:1;padding:8px 4px;font-size:12px" data-day-sleep="0.25" data-day="${selectedDay}">+15m</button>
+              <button class="btn bp" style="flex:1;padding:8px 4px;font-size:12px" data-day-sleep="1" data-day="${selectedDay}">+1h</button>
+            </div>
           </div>
         </div>
       </div>`;
@@ -3250,20 +3400,6 @@ function attachAll() {
   // RESUME SESSION
   $("[data-action='resume-day']")?.addEventListener("click",()=>{ST.showDayPicker=false;render();});
 
-  // START DAY — listen on both card and button
-  $$("[data-start-day]").forEach(el=>el.addEventListener("click", function(e){
-    // Prevent double-fire if click bubbles from button to card
-    if(e.target.closest("[data-start-day]") !== el) return;
-    const d=el.dataset.startDay;
-    if(ST.activeDay===d && ST.showDayPicker) { ST.showDayPicker=false; render(); return; }
-    if(ST.activeDay && ST.activeDay!==d) {
-      const hasSets=Object.values(ST.activeSets).some(function(s){return s.some(function(set){return set.weight||set.reps;});});
-      if(hasSets && !confirm("You have an active "+PLAN[ST.activeDay]?.label+" session. Start a different day? Your current progress will be lost.")) return;
-    }
-    ST.activeDay=d; ST.activeSets={}; ST.openEx={}; ST.openGuide={}; ST.showDayPicker=false;
-    loadDefaultSets(d); saveWorkoutProgress(); render();
-  }));
-
   // EXERCISE TOGGLE — surgical in-place update, never calls render()
   function toggleExBlock(id, toggleGuide) {
     if(toggleGuide) {
@@ -3508,12 +3644,43 @@ function attachAll() {
   $$("[data-action='clear-day']").forEach(el=>el.addEventListener("click",()=>{ST.activeDay=null;ST.activeSets={};ST.openEx={};ST.openGuide={};clearWorkoutProgress();render();}));
   $("[data-action='finish-workout']")?.addEventListener("click",()=>{
     const plan=PLAN[ST.activeDay]; if(!plan) return;
-    const exercises=plan.exercises.map(ex=>({id:ex.id,name:ex.name,sets:(ST.activeSets[ex.id]||[]).map(s=>({...s}))})).filter(ex=>ex.sets.some(s=>s.weight||s.reps||s.done));
+    const allEx = plan.exercises.concat(ST.extraExercises||[]);
+    const exercises=allEx.map(ex=>({id:ex.id,name:ex.name,sets:(ST.activeSets[ex.id]||[]).map(s=>({...s}))})).filter(ex=>ex.sets.some(s=>s.weight||s.reps||s.done));
     const log={id:Date.now().toString(),dayId:ST.activeDay,date:today(),duration:plan.duration,exercises};
     ST.workoutLogs.unshift(log);
     saveWorkoutLog(log);
-    ST.activeDay=null; ST.activeSets={}; ST.openEx={}; ST.openGuide={}; stopTimer(); ST.tab="history"; clearWorkoutProgress(); render();
+    ST.activeDay=null; ST.activeSets={}; ST.openEx={}; ST.openGuide={}; ST.extraExercises=[]; ST.exSearchQ=""; stopTimer(); ST.tab="workout"; ST.workoutView="log"; clearWorkoutProgress(); render();
   });
+
+  // EXERCISE SEARCH — surgical update only results, no full render
+  var exSearchEl = document.getElementById("ex-search-input");
+  if(exSearchEl) exSearchEl.addEventListener("input", function(){
+    ST.exSearchQ = exSearchEl.value;
+    var results = searchExercises(exSearchEl.value);
+    var alreadyAdded = (PLAN[ST.activeDay]?.exercises||[]).concat(ST.extraExercises||[]).map(function(e){return e.id;});
+    var rEl = document.getElementById("ex-search-results");
+    if(rEl) {
+      if(results.length > 0) {
+        rEl.innerHTML = `<div class="fsr">${results.map(e=>{
+          var added = alreadyAdded.includes(e.id);
+          return `<div class="ex-add-item" data-add-ex='${JSON.stringify(e).replace(/'/g,"&#39;")}' style="padding:8px 10px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);${added?"opacity:.4;pointer-events:none":"cursor:pointer"}">
+            <div><div style="font-weight:600;font-size:13px">${e.name}</div><div style="font-size:11px;color:var(--muted)">${e.muscle} · ${e.type}</div></div>
+            <div style="font-size:12px;font-weight:700;color:${added?"var(--muted)":"var(--accent)"}">${added?"Added":"+ Add"}</div>
+          </div>`;
+        }).join("")}</div>`;
+        rEl.querySelectorAll("[data-add-ex]").forEach(function(el2){
+          el2.addEventListener("click", function(e){ e.stopPropagation(); addExerciseToSession(el2.dataset.addEx); });
+        });
+      } else if(exSearchEl.value.length >= 1) {
+        rEl.innerHTML = `<div style="padding:8px;font-size:12px;color:var(--muted)">No matches — try a different name or muscle group</div>`;
+      } else { rEl.innerHTML = ""; }
+    }
+  });
+
+  // ADD EXERCISE from search results
+  $$("[data-add-ex]").forEach(el=>el.addEventListener("click",e=>{
+    e.stopPropagation(); addExerciseToSession(el.dataset.addEx);
+  }));
 
   // TIMER
   // TIMER STOP — use document-level delegation so it works from any tab
@@ -4313,21 +4480,23 @@ function saveWorkoutProgress() {
     S.set("wp_day", ST.activeDay);
     S.set("wp_sets", ST.activeSets);
     S.set("wp_openex", ST.openEx);
+    S.set("wp_extra", ST.extraExercises||[]);
   }
 }
 function clearWorkoutProgress() {
-  S.set("wp_day", null);
-  S.set("wp_sets", {});
-  S.set("wp_openex", {});
+  S.set("wp_day", null); S.set("wp_sets", {}); S.set("wp_openex", {}); S.set("wp_extra", []);
+  ST.extraExercises = []; ST.exSearchQ = "";
 }
 function loadWorkoutProgress() {
   var day = S.get("wp_day", null);
   var sets = S.get("wp_sets", null);
   var openEx = S.get("wp_openex", null);
+  var extra = S.get("wp_extra", []);
   if(day && sets) {
     ST.activeDay = day;
     ST.activeSets = sets;
     ST.openEx = openEx || {};
+    ST.extraExercises = extra || [];
     ST.showDayPicker = false;
     var plan = PLAN[day];
     if(plan) {
@@ -4339,6 +4508,14 @@ function loadWorkoutProgress() {
         if(allDone) ST.openEx[ex.id] = false;
       });
     }
+    // Also restore open state for extra exercises
+    (extra||[]).forEach(function(ex) {
+      var exSets = sets[ex.id] || [];
+      var hasAny = exSets.some(function(s){ return s.weight || s.reps; });
+      var allDone = exSets.length > 0 && exSets.every(function(s){ return s.done; });
+      if(hasAny && !allDone) ST.openEx[ex.id] = true;
+      if(allDone) ST.openEx[ex.id] = false;
+    });
   }
 }
 
@@ -4350,6 +4527,22 @@ document.addEventListener("click", function(e) {
   // Tempo explanation popup
   var tempoEl = e.target.closest("[data-tempo]");
   if(tempoEl) { e.stopPropagation(); ST.tempoPopup=tempoEl.dataset.tempo; render(); return; }
+  // START DAY — here so it never accumulates duplicate listeners
+  var startDayEl = e.target.closest("[data-start-day]");
+  if(startDayEl) {
+    var d = startDayEl.dataset.startDay;
+    if(ST.activeDay===d && ST.showDayPicker) { ST.showDayPicker=false; render(); return; }
+    if(ST.activeDay && ST.activeDay!==d) {
+      var hasSets=Object.values(ST.activeSets).some(function(s){return s.some(function(set){return set.weight||set.reps;});});
+      if(hasSets && !confirm("You have an active "+PLAN[ST.activeDay]?.label+" session. Start a different day? Your current progress will be lost.")) return;
+      ST.activeSets={}; ST.openEx={}; ST.openGuide={};
+    }
+    if(!ST.activeDay || ST.activeDay!==d) {
+      ST.activeDay=d; ST.activeSets={}; ST.openEx={}; ST.openGuide={};
+      loadDefaultSets(d); saveWorkoutProgress();
+    }
+    ST.showDayPicker=false; render(); return;
+  }
 }, true);
 window.addEventListener("error", function(e) { console.error("App error:", e); });
 window.addEventListener("unhandledrejection", function(e) { console.error("Promise error:", e); });
