@@ -1784,7 +1784,7 @@ function renderDayPicker() {
     <button class="btn" style="background:${suggestion.color};color:#000;font-size:12px;font-weight:700;padding:8px 14px;border-radius:var(--rs);border:none;cursor:pointer;flex-shrink:0" data-start-day="${suggestion.dayId}">Start →</button>
   </div>` : ""}
   <div style="height:4px"></div>
-  ${DAY_ORDER.map(d=>{const plan=PLAN[d],last=ST.workoutLogs.find(l=>l.dayId===d),isToday=td===d,isActive=ST.activeDay===d&&inProgress;return`<div class="daycard" style="${isToday?`border-color:${plan.color}`:""}${isActive?`;border-color:var(--accent);background:rgba(79,142,247,.05)`:""}" ><div class="dc-hdr"><div class="dc-dot" style="background:${plan.color}"></div><div><div class="dc-title" style="${isToday?`color:${plan.color}`:""}">${plan.emoji} ${plan.label} — ${plan.title}</div><div class="dc-meta">${plan.duration} · ${plan.exercises.length} exercises</div></div>${isToday?`<span class="pill pill-a">TODAY</span>`:""}${isActive?`<span class="pill" style="background:rgba(79,142,247,.2);color:var(--accent)">IN PROGRESS</span>`:""}</div><div class="dc-muscles">${plan.muscles}</div><div class="dc-foot"><span style="font-size:12px;color:var(--muted)">${last?`Last: ${fmtDate(last.date)}`:"Never logged"}</span><button class="btn ${isActive?"bp":"bg"}" style="padding:7px 16px;font-size:13px" data-start-day="${d}">${isActive?"Resume →":"Start →"}</button></div></div>`;}).join("")}
+  ${DAY_ORDER.map(d=>{const plan=PLAN[d],last=ST.workoutLogs.find(l=>l.dayId===d),isToday=td===d,isActive=ST.activeDay===d&&inProgress;return`<div class="daycard" style="${isToday?`border-color:${plan.color}`:""}${isActive?`;border-color:var(--accent);background:rgba(79,142,247,.05)`:""}" data-start-day="${d}"><div class="dc-hdr"><div class="dc-dot" style="background:${plan.color}"></div><div><div class="dc-title" style="${isToday?`color:${plan.color}`:""}">${plan.emoji} ${plan.label} — ${plan.title}</div><div class="dc-meta">${plan.duration} · ${plan.exercises.length} exercises</div></div>${isToday?`<span class="pill pill-a">TODAY</span>`:""}${isActive?`<span class="pill" style="background:rgba(79,142,247,.2);color:var(--accent)">IN PROGRESS</span>`:""}</div><div class="dc-muscles">${plan.muscles}</div><div class="dc-foot"><span style="font-size:12px;color:var(--muted)">${last?`Last: ${fmtDate(last.date)}`:"Never logged"}</span><button class="btn ${isActive?"bp":"bg"}" style="padding:7px 16px;font-size:13px">${isActive?"Resume →":"Start →"}</button></div></div>`;}).join("")}
   <div style="height:20px"></div>`;
 }
 
@@ -4539,7 +4539,7 @@ document.addEventListener("click", function(e) {
     }
     if(!ST.activeDay || ST.activeDay!==d) {
       ST.activeDay=d; ST.activeSets={}; ST.openEx={}; ST.openGuide={};
-      loadDefaultSets(d); saveWorkoutProgress();
+      saveWorkoutProgress();
     }
     ST.showDayPicker=false; render(); return;
   }
