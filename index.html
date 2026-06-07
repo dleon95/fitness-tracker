@@ -570,6 +570,8 @@ const ST = {
   chartRangeMeas: 28,
   charts: {},
   workoutView: "plan",
+  prView: "records",
+  prChartEx: null,
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {}, showDayPicker: false, extraExercises: [], exSearchQ: "",
   restTimer: null,
   showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]}, breakdown: null,
@@ -1219,18 +1221,39 @@ function shouldEval() { return ST.aiReports.length===0 || daysAgo(ST.aiReports[0
 
 async function runAI() {
   ST.aiLoading = true; render();
-  const days14 = [];
-  for(let i=13;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); const ds=d.toISOString().split("T")[0]; const s=nutSum(nutByDate(ds)); const w=ST.nutritionLogs.find(l=>l.date===ds&&l.type==="water"); const dl=getDailyLog(ds)||{}; days14.push({date:ds,nut:s,water:w?w.liters:0,steps:dl.steps||0,sleep:dl.sleep_hours||0}); }
-  const bs4 = [...ST.bodyStats].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,4);
-  const prs = getPRs().slice(0,8);
-  const sessions14 = ST.workoutLogs.filter(l=>daysAgo(l.date)<=14).length;
-  const protHit = days14.filter(d=>d.nut.p>=TARGETS.p).length;
-  const nutDays = days14.filter(d=>d.nut.cal>0);
+
+  // Determine evaluation window — since last report or last 30 days max
+  const lastReport = ST.aiReports[0];
+  const windowDays = lastReport ? Math.min(90, Math.max(7, daysAgo(lastReport.date))) : 30;
+  const windowLabel = lastReport ? `since last evaluation (${windowDays} days)` : `last ${windowDays} days`;
+
+  const periodDays = [];
+  for(let i=windowDays-1;i>=0;i--){
+    const d=new Date(); d.setDate(d.getDate()-i);
+    const ds=d.toISOString().split("T")[0];
+    const s=nutSum(nutByDate(ds));
+    const w=ST.nutritionLogs.find(l=>l.date===ds&&l.type==="water");
+    const dl=getDailyLog(ds)||{};
+    periodDays.push({date:ds,nut:s,water:w?w.liters:0,steps:dl.steps||0,sleep:dl.sleep_hours||0});
+  }
+
+  // Body stats since last report (all entries, not just 4)
+  const allStats = [...ST.bodyStats].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const periodStats = lastReport ? allStats.filter(s=>new Date(s.date)>=new Date(lastReport.date)) : allStats.slice(0,6);
+  const bs = periodStats.length > 0 ? periodStats : allStats.slice(0,4);
+
+  const prs = getPRs().slice(0,10);
+  const periodSessions = ST.workoutLogs.filter(l=>daysAgo(l.date)<=windowDays);
+  const sessionCount = periodSessions.length;
+  const expectedSessions = Math.round(windowDays * 6/7); // 6 sessions per week
+
+  const protHit = periodDays.filter(d=>d.nut.p>=TARGETS.p).length;
+  const nutDays = periodDays.filter(d=>d.nut.cal>0);
   const avgNut = nutDays.length>0 ? {cal:Math.round(nutDays.reduce((a,d)=>a+d.nut.cal,0)/nutDays.length), p:Math.round(nutDays.reduce((a,d)=>a+d.nut.p,0)/nutDays.length), days:nutDays.length} : null;
 
-  // Top foods logged in last 14 days
+  // Top foods in period
   const foodCounts = {};
-  ST.nutritionLogs.filter(function(l){ return l.type==="food" && daysAgo(l.date)<=14; }).forEach(function(l){
+  ST.nutritionLogs.filter(function(l){ return l.type==="food" && daysAgo(l.date)<=windowDays; }).forEach(function(l){
     if(!l.name) return;
     if(!foodCounts[l.name]) foodCounts[l.name]={count:0, totalCal:0, totalP:0, totalC:0, totalF:0};
     foodCounts[l.name].count++;
@@ -1243,78 +1266,93 @@ async function runAI() {
   const topProteinFoods = Object.entries(foodCounts).sort(function(a,b){return b[1].totalP-a[1].totalP;}).slice(0,5);
   const topCarbFoods = Object.entries(foodCounts).sort(function(a,b){return b[1].totalC-a[1].totalC;}).slice(0,5);
   const topFatFoods = Object.entries(foodCounts).sort(function(a,b){return b[1].totalF-a[1].totalF;}).slice(0,5);
-  const sleepDays = days14.filter(d=>d.sleep>0);
+
+  const sleepDays = periodDays.filter(d=>d.sleep>0);
   const avgSleep = sleepDays.length>0 ? Math.round(sleepDays.reduce((a,d)=>a+d.sleep,0)/sleepDays.length*10)/10 : null;
-  const waterDays = days14.filter(d=>d.water>0);
+  const waterDays = periodDays.filter(d=>d.water>0);
   const avgWater = waterDays.length>0 ? Math.round(waterDays.reduce((a,d)=>a+d.water,0)/waterDays.length*10)/10 : null;
-  const stepsDays = days14.filter(d=>d.steps>0);
+  const stepsDays = periodDays.filter(d=>d.steps>0);
   const avgSteps = stepsDays.length>0 ? Math.round(stepsDays.reduce((a,d)=>a+d.steps,0)/stepsDays.length) : null;
+
   const mainLifts = ["Back Squat","Barbell Bench Press","Barbell Hip Thrust","Pull-Up / Assisted","Barbell Bent-Over Row","Romanian Deadlift"];
   const liftProg = {};
-  mainLifts.forEach(name=>{const h=[];ST.workoutLogs.slice().reverse().forEach(log=>{const ex=log.exercises?.find(e=>e.name===name);if(ex){const best=Math.max(...(ex.sets||[]).map(s=>parseFloat(s.weight)||0));if(best>0)h.push({date:log.date,best});}});liftProg[name]=h.slice(-5);});
-  const prompt = `You are Diego's personal AI fitness coach. Analyze his last 2 weeks of data and give a specific, data-driven coaching evaluation.
+  mainLifts.forEach(name=>{
+    const h=[];
+    periodSessions.slice().reverse().forEach(log=>{
+      const ex=log.exercises?.find(e=>e.name===name);
+      if(ex){const best=Math.max(...(ex.sets||[]).map(s=>parseFloat(s.weight)||0));if(best>0)h.push({date:log.date,best});}
+    });
+    liftProg[name]=h.slice(-8);
+  });
+
+  // Current workout plan summary for exercise suggestions
+  const planSummary = DAY_ORDER.map(d=>`${d}: ${PLAN[d].exercises.map(e=>e.name+"(${e.sets}×${e.reps})").join(", ")}`).join("\n");
+  const prompt = `You are Diego's personal AI fitness coach. Analyze his data ${windowLabel} and give a specific, data-driven evaluation.
 
 PROFILE: 30M, 5'10", start 170lbs/19%BF. Goal: body recomp (lose belly fat, build muscle esp. legs). Desk job 8hr+2hr commute. Flat feet. 5am training.
 
 CURRENT TARGETS: ${TARGETS.cal} kcal, ${TARGETS.p}g protein, ${TARGETS.c}g carbs, ${TARGETS.f}g fat
 
-BODY STATS (recent first):
-${bs4.map(s=>`${s.date}: ${s.weight||"—"}lbs / ${s.bf||"—"}% BF / waist ${s.waist||"—"}" / hips ${s.hips||"—"}" / chest ${s.chest||"—"}" / R arm ${s.r_arm||"—"}" / R thigh ${s.r_thigh||"—"}"`).join("\n")||"No body stats logged"}
-${bs4.length>=2?`Waist trend: ${bs4[0].waist&&bs4[bs4.length-1].waist?((bs4[0].waist-bs4[bs4.length-1].waist)>0?"+":"")+(bs4[0].waist-bs4[bs4.length-1].waist).toFixed(1)+'" over '+bs4.length+' entries':"not enough data"}`:""}
-${bs4.length>=2?`Weight trend: ${bs4[0].weight&&bs4[bs4.length-1].weight?((bs4[0].weight-bs4[bs4.length-1].weight)>0?"+":"")+(bs4[0].weight-bs4[bs4.length-1].weight).toFixed(1)+"lbs over "+bs4.length+" entries'":"not enough data"}`:""}
-${bs4.length>=2&&bs4[0].r_arm&&bs4[bs4.length-1].r_arm?`Arm trend: ${((bs4[0].r_arm-bs4[bs4.length-1].r_arm)>0?"+":"")+(bs4[0].r_arm-bs4[bs4.length-1].r_arm).toFixed(1)+'" over '+bs4.length+' entries'}`:""}
+BODY STATS (newest first, all entries since last eval):
+${bs.map(s=>`${s.date}: ${s.weight||"—"}lbs / ${s.bf||"—"}% BF / waist ${s.waist||"—"}" / hips ${s.hips||"—"}" / chest ${s.chest||"—"}" / R arm ${s.r_arm||"—"}" / R thigh ${s.r_thigh||"—"}"`).join("\n")||"No body stats logged"}
+${bs.length>=2&&bs[0].waist&&bs[bs.length-1].waist?`Waist trend: ${((bs[0].waist-bs[bs.length-1].waist)>0?"+":"")+(bs[0].waist-bs[bs.length-1].waist).toFixed(1)}" over ${bs.length} entries`:""}
+${bs.length>=2&&bs[0].weight&&bs[bs.length-1].weight?`Weight trend: ${((bs[0].weight-bs[bs.length-1].weight)>0?"+":"")+(bs[0].weight-bs[bs.length-1].weight).toFixed(1)}lbs over ${bs.length} entries`:""}
+${bs.length>=2&&bs[0].r_arm&&bs[bs.length-1].r_arm?`Arm trend: ${((bs[0].r_arm-bs[bs.length-1].r_arm)>0?"+":"")+(bs[0].r_arm-bs[bs.length-1].r_arm).toFixed(1)}" over ${bs.length} entries`:""}
 
-TRAINING: ${sessions14}/12 sessions completed in last 14 days
-${DAY_ORDER.map(d=>{const c=ST.workoutLogs.filter(l=>l.dayId===d&&daysAgo(l.date)<=14).length;return d+":"+c;}).join(", ")}
+TRAINING: ${sessionCount}/${expectedSessions} expected sessions completed
+${DAY_ORDER.map(d=>{const c=ST.workoutLogs.filter(l=>l.dayId===d&&daysAgo(l.date)<=windowDays).length;return d+":"+c;}).join(", ")}
 
-LIFT PROGRESSION (lbs):
+CURRENT WORKOUT PLAN:
+${planSummary}
+
+LIFT PROGRESSION (lbs, this period):
 ${Object.entries(liftProg).map(([n,h])=>n+": "+(h.length?h.map(x=>x.date.slice(5)+":"+x.best).join(" → "):"no data")).join("\n")}
 
-TOP PRs: ${prs.map(([n,p])=>n+": "+p.weight+"lbs").join(", ")||"none yet"}
+TOP PRs (all time): ${prs.map(([n,p])=>n+": "+p.weight+"lbs").join(", ")||"none yet"}
 
 NUTRITION: ${avgNut?`Avg ${avgNut.cal} kcal, ${avgNut.p}g protein (${avgNut.days} days logged)`:"not enough data"}
-Protein target hit: ${protHit}/14 days
+Protein target hit: ${protHit}/${windowDays} days
 
-FOODS LOGGED (last 14 days):
-Most frequent: ${topFoods.length>0 ? topFoods.map(function([n,v]){return n+" ("+v.count+"x, "+Math.round(v.totalCal/v.count)+"kcal avg)";}).join(", ") : "no food data"}
-Top protein sources: ${topProteinFoods.length>0 ? topProteinFoods.map(function([n,v]){return n+" (+"+Math.round(v.totalP/v.count)+"g per log)";}).join(", ") : "none"}
-Top carb sources: ${topCarbFoods.length>0 ? topCarbFoods.map(function([n,v]){return n+" (+"+Math.round(v.totalC/v.count)+"g per log)";}).join(", ") : "none"}
-Top fat sources: ${topFatFoods.length>0 ? topFatFoods.map(function([n,v]){return n+" (+"+Math.round(v.totalF/v.count)+"g per log)";}).join(", ") : "none"}
+FOODS LOGGED:
+Most frequent: ${topFoods.length>0?topFoods.map(function([n,v]){return n+" ("+v.count+"x, "+Math.round(v.totalCal/v.count)+"kcal avg)";}).join(", "):"no food data"}
+Top protein sources: ${topProteinFoods.length>0?topProteinFoods.map(function([n,v]){return n+" (+"+Math.round(v.totalP/v.count)+"g per log)";}).join(", "):"none"}
+Top carb sources: ${topCarbFoods.length>0?topCarbFoods.map(function([n,v]){return n+" (+"+Math.round(v.totalC/v.count)+"g per log)";}).join(", "):"none"}
+Top fat sources: ${topFatFoods.length>0?topFatFoods.map(function([n,v]){return n+" (+"+Math.round(v.totalF/v.count)+"g per log)";}).join(", "):"none"}
 
 SLEEP: ${avgSleep?`Avg ${avgSleep}h/night (${sleepDays.length} days logged)`:"not tracked"}
-${sleepDays.length>0?days14.filter(d=>d.sleep>0).map(d=>d.date.slice(5)+":"+d.sleep+"h").join(", "):""}
-
 HYDRATION: ${avgWater?`Avg ${avgWater}L/day (target 3.5L, ${waterDays.length} days logged)`:"not tracked"}
-
 STEPS: ${avgSteps?`Avg ${avgSteps.toLocaleString()} steps/day (${stepsDays.length} days logged)`:"not tracked"}
 
 MY NOTES FOR THIS PERIOD:
 ${ST.aiNotes && ST.aiNotes.trim() ? `"${ST.aiNotes.trim()}"` : "No notes provided"}
 
-Respond with a JSON object containing two fields:
-1. "report": the full coaching evaluation as a markdown string with these exact sections:
+Respond with a JSON object with two fields:
+1. "report": markdown string with these exact sections:
 ### 📊 Progress Summary
 ### ✅ What's Working
 ### ⚠️ What Needs Attention
-### 🍽️ Nutrition & Food Quality (analyze his actual foods — what to keep, what to swap, what to add)
+### 🍽️ Nutrition & Food Quality (analyze his actual foods — keep, swap, add)
 ### 🏋️ Training Adjustments
 ### 😴 Recovery (sleep, hydration, steps)
-### 🎯 Next 2 Weeks — 3 numbered priorities
+### 🎯 Next Period — 3 numbered priorities
 
-2. "suggestions": array of 0-3 specific actionable changes (only include if data clearly supports them):
-[
-  {
-    "id": "unique_id",
-    "type": "calories|protein|carbs|fat|deload|frequency|sleep|hydration",
-    "emoji": "appropriate emoji",
-    "title": "short title",
-    "reason": "one sentence why, citing his actual numbers",
-    "change": "what changes e.g. '2400 → 2550 kcal' or 'Aim for 7.5h sleep' or 'Hit 3.5L water daily'",
-    "action": {"type": "update_target", "field": "cal|p|c|f", "value": 2550} or {"type": "deload", "exercise": "Back Squat", "weight": 135} or {"type": "info"}
-  }
-]
+2. "suggestions": array of 0-4 specific actionable changes. Each suggestion:
+{
+  "id": "unique_id",
+  "type": "calories|protein|carbs|fat|deload|swap_exercise|adjust_volume|sleep|hydration",
+  "emoji": "appropriate emoji",
+  "title": "short title",
+  "reason": "one sentence citing actual numbers",
+  "change": "specific change description",
+  "action": one of:
+    {"type":"update_target","field":"cal|p|c|f","value":2550}
+    {"type":"deload","exercise":"Back Squat","weight":135}
+    {"type":"swap_exercise","day":"MON","remove":"Seated Calf Raise","add":"Standing Calf Raise","addId":"stand_calf"}
+    {"type":"adjust_volume","day":"MON","exercise":"Back Squat","sets":4,"reps":"6-8"}
+    {"type":"info"}
+}
 
-Only suggest calorie/macro changes if there's a clear trend over 2+ weeks. Only suggest deload if same weight appears 3+ sessions. Return ONLY the JSON, no other text.`;
+Only suggest changes with clear data evidence. For exercise swaps use exact exercise names from the plan. Return ONLY the JSON.`;
 
   try {
     const resp = await fetch("https://fitness-proxy.leonsilvadiego.workers.dev", {
@@ -3070,12 +3108,99 @@ function renderCoach() {
   </div>` : ""}
 
   ${last?`<div class="ai-report">${fmtReport(last.report)}</div>`:""}
-  ${ST.aiReports.length>1?`<div class="card" style="padding:0"><div class="ct" style="padding:12px 14px 0">Previous Reports (${ST.aiReports.length-1})</div>${ST.aiReports.slice(1).map(r=>`<div style="padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer" data-exp-report="${r.id}"><div style="font-weight:700;font-size:13px">${fmtDate(r.date)}</div>${r.notes?`<div style="font-size:11px;color:var(--purple);margin-top:3px;font-style:italic">"${r.notes.slice(0,80)}${r.notes.length>80?"…":""}"</div>`:""}${ST.aiExpandedReport===r.id?`<div class="ai-report" style="margin-top:10px;padding:0;background:none;border:none;font-size:12px">${fmtReport(r.report)}</div>`:""}</div>`).join("")}</div>`:""}
+  ${ST.aiReports.length>1?`<div class="card" style="padding:0"><div class="ct" style="padding:12px 14px 0">Previous Reports (showing last ${Math.min(3,ST.aiReports.length-1)} of ${ST.aiReports.length-1})</div>${ST.aiReports.slice(1,4).map(r=>`<div style="padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer" data-exp-report="${r.id}"><div style="font-weight:700;font-size:13px">${fmtDate(r.date)}</div>${r.notes?`<div style="font-size:11px;color:var(--purple);margin-top:3px;font-style:italic">"${r.notes.slice(0,80)}${r.notes.length>80?"…":""}"</div>`:""}${ST.aiExpandedReport===r.id?`<div class="ai-report" style="margin-top:10px;padding:0;background:none;border:none;font-size:12px">${fmtReport(r.report)}</div>`:""}</div>`).join("")}</div>`:""}
   `}
   <div style="height:20px"></div>`;
 }
 
 // ── HISTORY ────────────────────────────────────────
+function renderProgressCharts() {
+  // Get all exercises that have been logged with weight
+  var exerciseHistory = {};
+  ST.workoutLogs.forEach(function(log){
+    (log.exercises||[]).forEach(function(ex){
+      var maxW = Math.max(...(ex.sets||[]).map(s=>parseFloat(s.weight)||0));
+      if(maxW > 0) {
+        if(!exerciseHistory[ex.name]) exerciseHistory[ex.name] = [];
+        exerciseHistory[ex.name].push({date:log.date, weight:maxW});
+      }
+    });
+  });
+  // Sort each exercise history by date
+  Object.keys(exerciseHistory).forEach(function(name){
+    exerciseHistory[name].sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+  });
+  var exercises = Object.keys(exerciseHistory).filter(function(n){return exerciseHistory[n].length>=2;});
+  if(exercises.length===0) return `<div class="empty"><div class="empty-icon">📈</div><div>Log at least 2 sessions for an exercise to see progress</div></div>`;
+
+  var sel = ST.prChartEx || exercises[0];
+  if(!exerciseHistory[sel]) sel = exercises[0];
+  var data = exerciseHistory[sel];
+  var maxW = Math.max(...data.map(d=>d.weight));
+  var minW = Math.min(...data.map(d=>d.weight));
+  var range = maxW - minW || 10;
+  var chartH = 140, chartW = 300, pad = 28;
+  var pts = data.map(function(d,i){
+    var x = pad + (i/(data.length-1||1))*(chartW-pad*2);
+    var y = chartH - pad - ((d.weight-minW)/range)*(chartH-pad*2);
+    return {x,y,d};
+  });
+  var pathD = pts.map(function(p,i){return (i===0?"M":"L")+p.x.toFixed(1)+","+p.y.toFixed(1);}).join(" ");
+
+  return `
+  <div class="card" style="padding:12px 14px">
+    <!-- Exercise selector pills -->
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
+      ${exercises.map(function(n){
+        var active = n===sel;
+        return `<button data-prchartex="${n}" style="padding:5px 10px;border-radius:99px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${active?"var(--accent)":"var(--border)"};background:${active?"rgba(79,142,247,.15)":"var(--bg3)"};color:${active?"var(--accent)":"var(--muted)"}">${n}</button>`;
+      }).join("")}
+    </div>
+
+    <!-- Chart -->
+    <div style="font-weight:700;font-size:14px;margin-bottom:4px">${sel}</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${data.length} sessions · PR: ${maxW} lbs · ${data[0].date.slice(5)} → ${data[data.length-1].date.slice(5)}</div>
+    <svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%;overflow:visible">
+      <!-- Grid lines -->
+      ${[0,0.25,0.5,0.75,1].map(function(t){
+        var y = chartH-pad-(t*(chartH-pad*2));
+        var w = Math.round(minW+t*range);
+        return `<line x1="${pad}" y1="${y.toFixed(1)}" x2="${chartW-pad+4}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
+        <text x="${pad-4}" y="${(y+4).toFixed(1)}" text-anchor="end" font-size="9" fill="rgba(255,255,255,.3)">${w}</text>`;
+      }).join("")}
+      <!-- Line -->
+      <path d="${pathD}" fill="none" stroke="#4f8ef7" stroke-width="2" stroke-linejoin="round"/>
+      <!-- Area fill -->
+      <path d="${pathD} L${pts[pts.length-1].x.toFixed(1)},${chartH-pad} L${pts[0].x.toFixed(1)},${chartH-pad} Z" fill="url(#chartGrad)" opacity="0.3"/>
+      <defs><linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4f8ef7"/><stop offset="100%" stop-color="#4f8ef7" stop-opacity="0"/></linearGradient></defs>
+      <!-- Points -->
+      ${pts.map(function(p,i){
+        var isMax = p.d.weight===maxW;
+        return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${isMax?5:3}" fill="${isMax?"#22c55e":"#4f8ef7"}" stroke="${isMax?"rgba(34,197,94,.3)":"rgba(79,142,247,.3)"}" stroke-width="${isMax?4:2}"/>
+        ${i===data.length-1||isMax?`<text x="${p.x.toFixed(1)}" y="${(p.y-8).toFixed(1)}" text-anchor="middle" font-size="9" fill="${isMax?"#22c55e":"#4f8ef7"}" font-weight="700">${p.d.weight}lbs</text>`:""}`;
+      }).join("")}
+      <!-- X axis dates -->
+      ${pts.filter(function(_,i){return i===0||i===pts.length-1||i===Math.floor(pts.length/2);}).map(function(p){
+        return `<text x="${p.x.toFixed(1)}" y="${chartH-4}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.3)">${p.d.date.slice(5)}</text>`;
+      }).join("")}
+    </svg>
+    ${data.length>=3?`
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px">
+      <div style="background:var(--bg3);border-radius:var(--rs);padding:8px;text-align:center">
+        <div style="font-size:10px;color:var(--muted)">First</div>
+        <div style="font-weight:700;font-size:16px">${data[0].weight}<span style="font-size:10px;color:var(--muted)">lbs</span></div>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--rs);padding:8px;text-align:center">
+        <div style="font-size:10px;color:var(--muted)">Latest</div>
+        <div style="font-weight:700;font-size:16px">${data[data.length-1].weight}<span style="font-size:10px;color:var(--muted)">lbs</span></div>
+      </div>
+      <div style="background:var(--bg3);border-radius:var(--rs);padding:8px;text-align:center">
+        <div style="font-size:10px;color:var(--muted)">Progress</div>
+        <div style="font-weight:700;font-size:16px;color:${data[data.length-1].weight>=data[0].weight?"#22c55e":"#ef4444"}">${data[data.length-1].weight>=data[0].weight?"+":""}${(data[data.length-1].weight-data[0].weight).toFixed(1)}<span style="font-size:10px">lbs</span></div>
+      </div>
+    </div>`:""}</div>`;
+}
+
 function renderHistory() {
   const prs = getPRs();
   const fromWorkout = ST.tab === "workout";
@@ -3095,7 +3220,12 @@ function renderHistory() {
   </div>
   <div style="height:12px"></div>
   ${activeTab==="prs" ? `
-    ${prs.length===0?`<div class="empty"><div class="empty-icon">🏆</div><div>Log your first workout to start tracking PRs!</div></div>`:`<div class="card" style="padding:0">${prs.map(([name,pr],i)=>`<div class="pr-item"><div class="pr-rank">${i<3?["🥇","🥈","🥉"][i]:(i+1)}</div><div class="pr-info"><div class="pr-name">${name}</div><div class="pr-date">${fmtDate(pr.date)} · ${PLAN[pr.dayId]?.label||pr.dayId}</div></div><div class="pr-wt"><div class="pr-lbs" style="color:${PLAN[pr.dayId]?.color||"#4f8ef7"}">${pr.weight}</div><div class="pr-unit">lbs</div></div></div>`).join("")}</div>`}
+    <div style="display:flex;gap:6px;margin:0 16px 12px">
+      <button data-prview="records" style="flex:1;padding:8px;border-radius:var(--rs);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${ST.prView!=="charts"?"var(--accent)":"var(--border)"};background:${ST.prView!=="charts"?"rgba(79,142,247,.15)":"var(--bg3)"};color:${ST.prView!=="charts"?"var(--accent)":"var(--muted)"}">🏆 Records</button>
+      <button data-prview="charts" style="flex:1;padding:8px;border-radius:var(--rs);font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${ST.prView==="charts"?"var(--accent)":"var(--border)"};background:${ST.prView==="charts"?"rgba(79,142,247,.15)":"var(--bg3)"};color:${ST.prView==="charts"?"var(--accent)":"var(--muted)"}">📈 Progress</button>
+    </div>
+    ${ST.prView==="charts" ? renderProgressCharts() :
+      prs.length===0?`<div class="empty"><div class="empty-icon">🏆</div><div>Log your first workout to start tracking PRs!</div></div>`:`<div class="card" style="padding:0">${prs.map(([name,pr],i)=>`<div class="pr-item"><div class="pr-rank">${i<3?["🥇","🥈","🥉"][i]:(i+1)}</div><div class="pr-info"><div class="pr-name">${name}</div><div class="pr-date">${fmtDate(pr.date)} · ${PLAN[pr.dayId]?.label||pr.dayId}</div></div><div class="pr-wt"><div class="pr-lbs" style="color:${PLAN[pr.dayId]?.color||"#4f8ef7"}">${pr.weight}</div><div class="pr-unit">lbs</div></div></div>`).join("")}</div>`}
   ` : `
     ${ST.workoutLogs.length===0?`<div class="empty"><div class="empty-icon">📅</div><div>Log your first workout to see history.</div></div>`:[...ST.workoutLogs].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(log=>{
       const plan=PLAN[log.dayId]||{},open=ST.expandedLog===log.id,vol=getVolume(log),sets=(log.exercises||[]).reduce((t,e)=>t+(e.sets||[]).length,0);
@@ -3952,6 +4082,36 @@ function attachAll() {
         alert("✅ Updated: "+s.change+"\n\nYour macro targets have been updated.");
       } else if(s.action.type==="deload") {
         alert("✅ Deload noted for "+s.action.exercise+".\n\nNext time you open that exercise, aim for "+s.action.weight+" lbs.");
+      } else if(s.action.type==="swap_exercise") {
+        var day=s.action.day, removeEx=s.action.remove, addId=s.action.addId, addName=s.action.add;
+        if(day && PLAN[day] && removeEx) {
+          var idx=PLAN[day].exercises.findIndex(function(e){return e.name===removeEx||e.id===s.action.removeId;});
+          if(idx>=0 && addId && addName) {
+            // Find the exercise from library or keep basic structure
+            var libEx = EXERCISE_LIBRARY.find(function(e){return e.id===addId||e.name===addName;});
+            var oldEx = PLAN[day].exercises[idx];
+            PLAN[day].exercises[idx] = Object.assign({}, oldEx, {
+              id: addId||addName.toLowerCase().replace(/\s+/g,"_"),
+              name: addName,
+              muscles: libEx ? [libEx.muscle] : oldEx.muscles
+            });
+            save();
+            alert("✅ Swapped: "+removeEx+" → "+addName+" in "+day+" workout.\n\nReopen that day to see the change.");
+          }
+        }
+      } else if(s.action.type==="adjust_volume") {
+        var day2=s.action.day, exName=s.action.exercise;
+        if(day2 && PLAN[day2] && exName) {
+          var ex=PLAN[day2].exercises.find(function(e){return e.name===exName;});
+          if(ex) {
+            if(s.action.sets) ex.sets=s.action.sets;
+            if(s.action.reps) ex.reps=s.action.reps;
+            save();
+            alert("✅ Updated "+exName+" in "+day2+" to "+s.action.sets+"×"+s.action.reps);
+          }
+        }
+      } else if(s.action.type==="info") {
+        alert("✅ Noted: "+s.change);
       }
     }
     s.dismissed=true; render();
@@ -4181,6 +4341,19 @@ function attachAll() {
     } else {
       render();
     }
+  }));
+
+  // PR VIEW TOGGLE (Records vs Charts)
+  $$("[data-prview]").forEach(el=>el.addEventListener("click",()=>{
+    ST.prView=el.dataset.prview; render();
+  }));
+  // EXERCISE CHART SELECTOR
+  $$("[data-prchartex]").forEach(el=>el.addEventListener("click",e=>{
+    e.stopPropagation();
+    ST.prChartEx=el.dataset.prchartex;
+    var pg=document.getElementById("pg"); var sy=pg?pg.scrollTop:0;
+    render();
+    requestAnimationFrame(function(){ var pg2=document.getElementById("pg"); if(pg2) pg2.scrollTop=sy; });
   }));
 
   // WORKOUT VIEW TOGGLE (Log / PRs / back to plan)
