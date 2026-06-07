@@ -1385,7 +1385,33 @@ Only suggest changes with clear data evidence. For exercise swaps use exact exer
 }
 
 function fmtReport(t) {
-  return t.replace(/### (.*)/g,"<h3>$1</h3>").replace(/\*\*(.*?)\*\*/g,"<strong>$1</strong>").replace(/\n\n/g,"<br><br>").replace(/\n/g,"<br>");
+  if(!t) return "";
+  return t
+    // Headers
+    .replace(/^### (.*)/gm, '<h3 style="font-family:var(--font-d);font-size:16px;letter-spacing:.5px;color:var(--accent);margin:18px 0 8px;padding-bottom:6px;border-bottom:1px solid rgba(79,142,247,.2)">$1</h3>')
+    .replace(/^## (.*)/gm,  '<h2 style="font-family:var(--font-d);font-size:18px;color:var(--accent);margin:20px 0 10px">$1</h2>')
+    .replace(/^# (.*)/gm,   '<h2 style="font-family:var(--font-d);font-size:20px;color:var(--accent);margin:20px 0 10px">$1</h2>')
+    // Bold and italic
+    .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    // Bullet points
+    .replace(/^[-•] (.*)/gm, '<div style="display:flex;gap:8px;margin:4px 0"><span style="color:var(--accent);flex-shrink:0">•</span><span>$1</span></div>')
+    .replace(/^\d+\. (.*)/gm, '<div style="display:flex;gap:8px;margin:4px 0"><span style="color:var(--accent);font-weight:700;flex-shrink:0;min-width:16px">$1.</span><span>$2</span></div>'.replace('$1','').replace('$2','$1'))
+    // Checkmarks and X marks
+    .replace(/✅ (.*)/g, '<div style="display:flex;gap:8px;margin:3px 0;color:#22c55e"><span>✅</span><span>$1</span></div>')
+    .replace(/⚠️ (.*)/g, '<div style="display:flex;gap:8px;margin:3px 0;color:var(--orange)"><span>⚠️</span><span>$1</span></div>')
+    .replace(/❌ (.*)/g, '<div style="display:flex;gap:8px;margin:3px 0;color:#ef4444"><span>❌</span><span>$1</span></div>')
+    .replace(/🥦 (.*)/g, '<div style="display:flex;gap:8px;margin:3px 0"><span>🥦</span><span>$1</span></div>')
+    .replace(/🐟 (.*)/g, '<div style="display:flex;gap:8px;margin:3px 0"><span>🐟</span><span>$1</span></div>')
+    .replace(/🍗 (.*)/g, '<div style="display:flex;gap:8px;margin:3px 0"><span>🍗</span><span>$1</span></div>')
+    .replace(/🥚 (.*)/g, '<div style="display:flex;gap:8px;margin:3px 0"><span>🥚</span><span>$1</span></div>')
+    .replace(/🫘 (.*)/g, '<div style="display:flex;gap:8px;margin:3px 0"><span>🫘</span><span>$1</span></div>')
+    // Numbered lists (1. 2. 3.)
+    .replace(/^(\d+)\. (.*)/gm, '<div style="display:flex;gap:8px;margin:5px 0"><span style="color:var(--accent);font-weight:700;flex-shrink:0;min-width:20px">$1.</span><span>$2</span></div>')
+    // Line breaks
+    .replace(/\n\n/g, '<div style="height:8px"></div>')
+    .replace(/\n/g, '<br>');
 }
 
 // ══════════════════════════════════════════════════
