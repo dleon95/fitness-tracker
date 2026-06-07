@@ -579,7 +579,7 @@ const ST = {
   csFilter: "All", csSearch: "", csExpanded: null,
   nutFoodQuery: "",
   foodLogDate: null, // explicitly set when logging to a specific date
-  aiLoading: false, aiTab: "latest", aiExpandedReport: null, aiSuggestions: [],
+  aiLoading: false, aiTab: "latest", aiExpandedReport: null, aiSuggestions: [], aiNotes: "",
 };
 
 function save() {
@@ -1288,6 +1288,9 @@ HYDRATION: ${avgWater?`Avg ${avgWater}L/day (target 3.5L, ${waterDays.length} da
 
 STEPS: ${avgSteps?`Avg ${avgSteps.toLocaleString()} steps/day (${stepsDays.length} days logged)`:"not tracked"}
 
+MY NOTES FOR THIS PERIOD:
+${ST.aiNotes && ST.aiNotes.trim() ? `"${ST.aiNotes.trim()}"` : "No notes provided"}
+
 Respond with a JSON object containing two fields:
 1. "report": the full coaching evaluation as a markdown string with these exact sections:
 ### 📊 Progress Summary
@@ -1329,9 +1332,10 @@ Only suggest calorie/macro changes if there's a clear trend over 2+ weeks. Only 
         suggestions = parsed.suggestions || [];
       }
     } catch(e2) { reportText = text; }
-    const report={id:Date.now().toString(), date:today(), report:reportText, snapshot:{sessions14,protHit,avgNut,weight:bs4[0]?.weight,bf:bs4[0]?.bf}};
+    const report={id:Date.now().toString(), date:today(), report:reportText, notes:ST.aiNotes||"", snapshot:{sessions14,protHit,avgNut,weight:bs4[0]?.weight,bf:bs4[0]?.bf}};
     ST.aiReports.unshift(report);
     ST.aiSuggestions = suggestions.map(function(s){ return Object.assign({}, s, {dismissed:false}); });
+    ST.aiNotes = ""; // clear after running
     saveAIReport(report);
     save();
   } catch(e) {
@@ -2977,7 +2981,7 @@ function renderBody() {
 
   <div class="card"><div class="ct">History</div>
     ${ST.bodyStats.length===0?'<div class="empty"><div class="empty-icon">📊</div><div>No stats yet.</div></div>':
-      ST.bodyStats.map(s=>{
+      [...ST.bodyStats].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(s=>{
         const hasPhoto=getPhotos(s).length>0;
         const isExpanded=ST.expandedStat===s.id;
         const isUploading=ST.photoUploading===s.id;
@@ -3033,7 +3037,11 @@ function renderCoach() {
       <div><div style="font-weight:700;font-size:14px">${canEval?"Ready for evaluation":`Next in ${dtu} days`}</div><div style="font-size:12px;color:var(--muted);margin-top:3px">${last?`Last: ${fmtDate(last.date)}`:"No evaluations yet"}</div></div>
       <button class="btn bp" style="padding:10px 18px" data-action="run-ai">${canEval?"Run Now →":"Re-run →"}</button>
     </div>
-    <div style="font-size:12px;color:var(--muted);line-height:1.6">${ST.workoutLogs.length} workouts · ${ST.bodyStats.length} body entries · ${ST.nutritionLogs.filter(l=>l.type==="food").length} food logs · ${getPRs().length} PRs tracked</div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:12px">${ST.workoutLogs.length} workouts · ${ST.bodyStats.length} body entries · ${ST.nutritionLogs.filter(l=>l.type==="food").length} food logs · ${getPRs().length} PRs tracked</div>
+    <div style="border-top:1px solid var(--border);padding-top:12px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:6px">📝 How's it going? <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:11px">Coach will factor this in</span></div>
+      <textarea id="ai-notes-input" style="width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:10px;color:var(--text);font-family:var(--font-b);font-size:13px;line-height:1.5;resize:none;min-height:90px;box-sizing:border-box;outline:none" placeholder="How did you feel this week? Energy, soreness, stress, injuries, mood, anything that affected your training…">${ST.aiNotes||""}</textarea>
+    </div>
     ${ST.workoutLogs.length===0?`<div style="margin-top:10px;padding:10px;background:rgba(234,179,8,.08);border-left:3px solid var(--yellow);border-radius:0 var(--rs) var(--rs) 0;font-size:12px;color:var(--muted2)">💡 Log at least 1 week of workouts before running your first evaluation.</div>`:""}
   </div>
 
@@ -3062,7 +3070,7 @@ function renderCoach() {
   </div>` : ""}
 
   ${last?`<div class="ai-report">${fmtReport(last.report)}</div>`:""}
-  ${ST.aiReports.length>1?`<div class="card" style="padding:0"><div class="ct" style="padding:12px 14px 0">Previous Reports (${ST.aiReports.length-1})</div>${ST.aiReports.slice(1).map(r=>`<div style="padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer" data-exp-report="${r.id}"><div style="font-weight:700;font-size:13px">${fmtDate(r.date)}</div><div style="font-size:12px;color:var(--muted);margin-top:3px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${r.report.replace(/[#*]/g,"").slice(0,120)}…</div>${ST.aiExpandedReport===r.id?`<div class="ai-report" style="margin-top:10px;padding:0;background:none;border:none;font-size:12px">${fmtReport(r.report)}</div>`:""}</div>`).join("")}</div>`:""}
+  ${ST.aiReports.length>1?`<div class="card" style="padding:0"><div class="ct" style="padding:12px 14px 0">Previous Reports (${ST.aiReports.length-1})</div>${ST.aiReports.slice(1).map(r=>`<div style="padding:12px 14px;border-bottom:1px solid var(--border);cursor:pointer" data-exp-report="${r.id}"><div style="font-weight:700;font-size:13px">${fmtDate(r.date)}</div>${r.notes?`<div style="font-size:11px;color:var(--purple);margin-top:3px;font-style:italic">"${r.notes.slice(0,80)}${r.notes.length>80?"…":""}"</div>`:""}${ST.aiExpandedReport===r.id?`<div class="ai-report" style="margin-top:10px;padding:0;background:none;border:none;font-size:12px">${fmtReport(r.report)}</div>`:""}</div>`).join("")}</div>`:""}
   `}
   <div style="height:20px"></div>`;
 }
@@ -3415,11 +3423,15 @@ function attachAll() {
       ST.openEx[id] = opening;
       if(!ST.openEx[id]) ST.openGuide[id] = false;
     }
-    // Find the exercise in the plan
+    // Find the exercise in the plan or extras
     var ex = null;
     var exIdx = 0;
     if(ST.activeDay && PLAN[ST.activeDay]) {
       PLAN[ST.activeDay].exercises.forEach(function(e, i){ if(e.id===id){ex=e; exIdx=i;} });
+    }
+    if(!ex && ST.extraExercises) {
+      var planLen2 = ST.activeDay&&PLAN[ST.activeDay] ? PLAN[ST.activeDay].exercises.length : 0;
+      ST.extraExercises.forEach(function(e,i){ if(e.id===id){ex=e; exIdx=planLen2+i;} });
     }
     if(!ex) { render(); return; }
     // Replace just this exercise block's HTML
@@ -3599,6 +3611,11 @@ function attachAll() {
     if(!exEl) return;
     var planEx=null, planIdx=0;
     if(ST.activeDay&&PLAN[ST.activeDay]) PLAN[ST.activeDay].exercises.forEach(function(e,i){if(e.id===eid){planEx=e;planIdx=i;}});
+    // Also search extra exercises if not found in plan
+    if(!planEx && ST.extraExercises) {
+      var planLen = ST.activeDay&&PLAN[ST.activeDay] ? PLAN[ST.activeDay].exercises.length : 0;
+      ST.extraExercises.forEach(function(e,i){if(e.id===eid){planEx=e;planIdx=planLen+i;}});
+    }
     if(!planEx) return;
     var temp=document.createElement("div");
     temp.innerHTML=renderExBlock(planEx,planIdx);
@@ -3919,6 +3936,9 @@ function attachAll() {
 
   // AI COACH
   $("[data-action='run-ai']")?.addEventListener("click",runAI);
+  // Save journal notes as user types
+  var aiNotesEl = document.getElementById("ai-notes-input");
+  if(aiNotesEl) aiNotesEl.addEventListener("input", function(){ ST.aiNotes = aiNotesEl.value; save(); });
 
   // SUGGESTION APPLY
   $$("[data-apply-suggestion]").forEach(el=>el.addEventListener("click",()=>{
@@ -4523,7 +4543,15 @@ function loadWorkoutProgress() {
 document.addEventListener("click", function(e) {
   // Timer stop button — works from any tab
   var stopBtn = e.target.closest("[data-action='stop-timer']");
-  if(stopBtn) { e.stopPropagation(); stopTimer(); render(); return; }
+  if(stopBtn) {
+    e.stopPropagation();
+    var pg = document.getElementById("pg");
+    var sy = pg ? pg.scrollTop : 0;
+    stopTimer();
+    render();
+    requestAnimationFrame(function(){ var pg2=document.getElementById("pg"); if(pg2) pg2.scrollTop=sy; });
+    return;
+  }
   // Tempo explanation popup
   var tempoEl = e.target.closest("[data-tempo]");
   if(tempoEl) { e.stopPropagation(); ST.tempoPopup=tempoEl.dataset.tempo; render(); return; }
