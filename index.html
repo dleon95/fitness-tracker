@@ -554,7 +554,12 @@ function getQuickServings(foodName) {
 // ══════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════
-const TARGETS = {cal:2400, p:175, c:245, f:65, water:3.5};
+var TARGETS = {cal:2400, p:175, c:245, f:65, water:3.5};
+function loadTargets() {
+  var saved = S.get("targets", null);
+  if(saved && saved.cal) Object.assign(TARGETS, saved);
+}
+function saveTargets() { S.set("targets", TARGETS); }
 
 const ST = {
   tab: "dashboard",
@@ -574,7 +579,7 @@ const ST = {
   prChartEx: null,
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {}, showDayPicker: false, extraExercises: [], exSearchQ: "",
   restTimer: null,
-  showBodyModal: false, showFoodModal: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]}, breakdown: null,
+  showBodyModal: false, showFoodModal: false, showTargetEditor: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]}, breakdown: null,
   expandedLog: null,
   foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""}, photoLookingUp: false,
   nutTab: "today",
@@ -662,7 +667,7 @@ function saveWaterLog(entry) {
 }
 function saveAIReport(report) {
   save();
-  sbUpsert("ai_reports", { id:report.id, date:report.date, report:report.report, snapshot:report.snapshot, created_at:clientTs() });
+  sbUpsert("ai_reports", { id:report.id, date:report.date, window_start:report.windowStart||null, report:report.report, notes:report.notes||null, snapshot:report.snapshot, created_at:clientTs() });
 }
 function deleteFromCloud(table, id) { sbDelete(table, id); }
 function syncToCloud(t, r)          { sbUpsert(t, r); }
@@ -1370,7 +1375,7 @@ Only suggest changes with clear data evidence. For exercise swaps use exact exer
         suggestions = parsed.suggestions || [];
       }
     } catch(e2) { reportText = text; }
-    const report={id:Date.now().toString(), date:today(), report:reportText, notes:ST.aiNotes||"", snapshot:{sessions:sessionCount,protHit,avgNut,weight:bs[0]?.weight,bf:bs[0]?.bf}};
+    const report={id:Date.now().toString(), date:today(), windowStart:lastReport ? lastReport.date : periodDays[0]?.date, report:reportText, notes:ST.aiNotes||"", snapshot:{sessions:sessionCount,protHit,avgNut,weight:bs[0]?.weight,bf:bs[0]?.bf}};
     ST.aiReports.unshift(report);
     ST.aiSuggestions = suggestions.map(function(s){ return Object.assign({}, s, {dismissed:false}); });
     ST.aiNotes = ""; // clear after running
@@ -1421,7 +1426,7 @@ function render() {
   // Destroy existing charts before rebuilding DOM
   if(ST.charts) Object.values(ST.charts).forEach(c=>{try{c.destroy();}catch{}});
   ST.charts = {};
-  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}${ST.editingLog?renderEditLogModal():""}${ST.editingCustomFood?renderEditCustomFoodModal():""}${ST.tempoPopup?renderTempoPopup():""}${ST.showMealBuilder?renderMealBuilder():""}`;
+  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}${ST.editingLog?renderEditLogModal():""}${ST.editingCustomFood?renderEditCustomFoodModal():""}${ST.tempoPopup?renderTempoPopup():""}${ST.showMealBuilder?renderMealBuilder():""}${ST.showTargetEditor?renderTargetEditor():""}`;
   attachAll();
   renderCharts();
 }
@@ -2142,8 +2147,9 @@ function renderNutToday(sum, entries, water, filled) {
     {label:"Fat",     val:ri(sum.f),  target:TARGETS.f,  color:"#eab308", unit:"g"},
   ];
   return `
-  <div style="padding:0 16px 12px">
-    <button class="btn bp bfull" data-action="open-food">+ Log Food</button>
+  <div style="padding:0 16px 12px;display:flex;gap:8px">
+    <button class="btn bp" style="flex:1" data-action="open-food">+ Log Food</button>
+    <button data-action="open-targets" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:10px 14px;font-size:12px;font-weight:700;color:var(--muted);cursor:pointer;font-family:var(--font-b)">⚙️ Targets</button>
   </div>
   <div class="card"><div class="ct">Today's Macros</div>${macroRows(sum)}</div>
   <div class="card">
@@ -2784,6 +2790,22 @@ function renderMealBuilder() {
   </div></div>`;
 }
 
+function renderTargetEditor() {
+  return `<div class="moverlay" data-action="close-targets"><div class="modal" onclick="event.stopPropagation()">
+    <div class="mhandle"></div>
+    <div class="mtitle">DAILY TARGETS</div>
+    <div style="font-size:12px;color:var(--muted);margin:-8px 0 16px">Adjust based on AI coach recommendations</div>
+    <div class="igrid">
+      <div class="fgrp"><label class="flbl">Calories (kcal)</label><input class="finput" type="number" inputmode="numeric" id="tgt-cal" value="${TARGETS.cal}"></div>
+      <div class="fgrp"><label class="flbl">Protein (g)</label><input class="finput" type="number" inputmode="numeric" id="tgt-p" value="${TARGETS.p}"></div>
+      <div class="fgrp"><label class="flbl">Carbs (g)</label><input class="finput" type="number" inputmode="numeric" id="tgt-c" value="${TARGETS.c}"></div>
+      <div class="fgrp"><label class="flbl">Fat (g)</label><input class="finput" type="number" inputmode="numeric" id="tgt-f" value="${TARGETS.f}"></div>
+    </div>
+    <div class="fgrp"><label class="flbl">Water (L)</label><input class="finput" type="number" inputmode="decimal" id="tgt-w" value="${TARGETS.water}" step="0.5"></div>
+    <button class="btn bp bfull blg" data-action="save-targets">Save Targets</button>
+  </div></div>`;
+}
+
 function renderEditCustomFoodModal() {
   var f = ST.editingCustomFood;
   if(!f) return "";
@@ -3140,7 +3162,10 @@ function renderCoach() {
       var isOpen = ST.aiExpandedReport===r.id;
       var isLatest = i===0;
       // Try to get date range from snapshot or just show report date
-      var label = isLatest ? "Latest · "+fmtDate(r.date) : fmtDate(r.date);
+      var spanLabel = r.windowStart && r.windowStart !== r.date
+        ? fmtDate(r.windowStart) + ' → ' + fmtDate(r.date)
+        : fmtDate(r.date);
+      var label = isLatest ? 'Latest · ' + spanLabel : spanLabel;
       return `<div style="border-top:1px solid var(--border)">
         <div data-exp-report="${r.id}" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;cursor:pointer">
           <div>
@@ -3956,6 +3981,19 @@ function attachAll() {
     }
     saveBodyStat(stat); ST.showBodyModal=false; ST.editingStat=null; render();
   });
+  // TARGET EDITOR
+  $("[data-action='open-targets']")?.addEventListener("click",()=>{ST.showTargetEditor=true;render();});
+  $("[data-action='close-targets']")?.addEventListener("click",()=>{ST.showTargetEditor=false;render();});
+  $("[data-action='save-targets']")?.addEventListener("click",()=>{
+    var cal=parseFloat(document.getElementById("tgt-cal")?.value);
+    var p=parseFloat(document.getElementById("tgt-p")?.value);
+    var c=parseFloat(document.getElementById("tgt-c")?.value);
+    var f=parseFloat(document.getElementById("tgt-f")?.value);
+    var w=parseFloat(document.getElementById("tgt-w")?.value);
+    if(cal) TARGETS.cal=cal; if(p) TARGETS.p=p; if(c) TARGETS.c=c; if(f) TARGETS.f=f; if(w) TARGETS.water=w;
+    saveTargets(); save(); ST.showTargetEditor=false; render();
+  });
+
   // FOOD MODAL
   $("[data-action='open-food']")?.addEventListener("click",()=>{
     ST.showFoodModal=true; ST.foodSearch=""; ST.foodResults=[]; ST.foodEntry={food:null,grams:""}; ST.editingFood=null; render();
@@ -4126,6 +4164,7 @@ function attachAll() {
     if(s.action) {
       if(s.action.type==="update_target" && s.action.field && s.action.value) {
         TARGETS[s.action.field] = s.action.value;
+        saveTargets();
         save();
         alert("✅ Updated: "+s.change+"\n\nYour macro targets have been updated.");
       } else if(s.action.type==="deload") {
@@ -4675,6 +4714,7 @@ function loadFromCache() {
 }
 
 function boot() {
+  loadTargets();
   loadWorkoutProgress();
   showLoader();
 
