@@ -585,7 +585,8 @@ const ST = {
   nutTab: "today",
   csFilter: "All", csSearch: "", csExpanded: null,
   nutFoodQuery: "",
-  foodLogDate: null, // explicitly set when logging to a specific date
+  foodLogDate: null,
+  nutMealContext: null, // null = auto-detect from time // explicitly set when logging to a specific date
   aiLoading: false, aiTab: "latest", aiExpandedReport: null, aiSuggestions: [], aiNotes: "",
 };
 
@@ -2139,6 +2140,252 @@ function renderNutrition() {
   <div class="tab-pills">${["today","week"].map(t=>`<div class="tab-pill${ST.nutTab===t?" active":""}" data-nut-tab="${t}">${t==="today"?"Today":"This Week"}</div>`).join("")}</div>
   ${ST.nutTab==="today"?renderNutToday(sum,todayE,water,filled):renderNutWeek()}`;
 }
+// Meal time detection based on Diego's schedule
+function getMealContext() {
+  var h = new Date().getHours();
+  if(h >= 5 && h < 11)  return {id:"breakfast", label:"🌅 Breakfast",    tip:"Load up on protein + carbs to fuel your day",    carbOk:true,  carbNote:"Higher carbs fine — fuel for the day"};
+  if(h >= 11 && h < 16) return {id:"lunch",     label:"☀️ Lunch",        tip:"Biggest meal — balanced protein, carbs, veg",     carbOk:true,  carbNote:"Balanced carbs OK"};
+  if(h >= 16 && h < 21) return {id:"dinner",    label:"🌙 Dinner",       tip:"High protein, light carbs, plenty of vegetables", carbOk:false, carbNote:"Keep carbs under 50-60g"};
+  return                        {id:"snack",     label:"🌙 Late",         tip:"Light snack only — protein focused",              carbOk:false, carbNote:"Protein only if possible"};
+}
+
+// Healthy food building blocks — each has per-serving macros
+const HEALTHY_FOODS = [
+  // Proteins
+  {name:"Chicken breast",    emoji:"🍗", cal:165, p:31, c:0,  f:4,  unit:"200g", srv:200, tags:["protein","lean","lunch","dinner","breakfast"]},
+  {name:"Tilapia",           emoji:"🐟", cal:110, p:23, c:0,  f:2,  unit:"200g", srv:200, tags:["protein","lean","dinner","lunch"]},
+  {name:"Salmon",            emoji:"🐟", cal:208, p:28, c:0,  f:10, unit:"150g", srv:150, tags:["protein","dinner","lunch"]},
+  {name:"Tuna (canned)",     emoji:"🐟", cal:130, p:28, c:0,  f:1,  unit:"150g", srv:150, tags:["protein","lean","lunch","dinner"]},
+  {name:"Egg whites",        emoji:"🥚", cal:85,  p:18, c:1,  f:0,  unit:"6 whites", srv:180, tags:["protein","lean","breakfast","snack"]},
+  {name:"Whole eggs",        emoji:"🥚", cal:280, p:24, c:2,  f:18, unit:"4 eggs", srv:200, tags:["protein","breakfast"]},
+  {name:"Greek yogurt",      emoji:"🫙", cal:100, p:17, c:6,  f:0,  unit:"175g", srv:175, tags:["protein","breakfast","snack"]},
+  {name:"Cottage cheese",    emoji:"🧀", cal:160, p:22, c:6,  f:4,  unit:"200g", srv:200, tags:["protein","snack","dinner"]},
+  {name:"Whey protein",      emoji:"🥤", cal:130, p:25, c:5,  f:2,  unit:"1 scoop", srv:35, tags:["protein","snack","breakfast"]},
+  {name:"Shrimp",            emoji:"🦐", cal:100, p:24, c:0,  f:1,  unit:"200g", srv:200, tags:["protein","lean","dinner","lunch"]},
+  {name:"Turkey breast",     emoji:"🦃", cal:150, p:30, c:0,  f:2,  unit:"150g", srv:150, tags:["protein","lean","lunch","dinner"]},
+  {name:"Lentils (cooked)",  emoji:"🫘", cal:230, p:18, c:40, f:1,  unit:"200g", srv:200, tags:["protein","carbs","fiber","lunch","dinner"]},
+  {name:"Black beans",       emoji:"🫘", cal:220, p:15, c:40, f:1,  unit:"200g", srv:200, tags:["protein","carbs","fiber","lunch","dinner"]},
+  {name:"Chickpeas",         emoji:"🫘", cal:210, p:11, c:35, f:3,  unit:"180g", srv:180, tags:["protein","carbs","lunch","dinner"]},
+
+  // Complex carbs
+  {name:"Oats",              emoji:"🥣", cal:300, p:10, c:54, f:5,  unit:"80g dry", srv:80, tags:["carbs","fiber","breakfast"]},
+  {name:"Sweet potato",      emoji:"🍠", cal:180, p:4,  c:41, f:0,  unit:"200g", srv:200, tags:["carbs","fiber","lunch","dinner"]},
+  {name:"Quinoa (cooked)",   emoji:"🌾", cal:220, p:8,  c:40, f:4,  unit:"180g", srv:180, tags:["carbs","protein","lunch","dinner"]},
+  {name:"Brown rice",        emoji:"🍚", cal:215, p:5,  c:45, f:2,  unit:"180g cooked", srv:180, tags:["carbs","lunch","dinner"]},
+  {name:"White rice",        emoji:"🍚", cal:240, p:5,  c:52, f:0,  unit:"180g cooked", srv:180, tags:["carbs","breakfast","lunch"]},
+  {name:"Banana",            emoji:"🍌", cal:105, p:1,  c:27, f:0,  unit:"1 medium", srv:120, tags:["carbs","breakfast","snack"]},
+  {name:"Apple",             emoji:"🍎", cal:80,  p:0,  c:21, f:0,  unit:"1 medium", srv:180, tags:["carbs","snack","fiber"]},
+
+  // Vegetables (high volume, low cal)
+  {name:"Broccoli",          emoji:"🥦", cal:55,  p:4,  c:11, f:1,  unit:"200g", srv:200, tags:["veg","fiber","lunch","dinner","anytime"]},
+  {name:"Spinach",           emoji:"🥬", cal:30,  p:4,  c:5,  f:0,  unit:"150g", srv:150, tags:["veg","fiber","dinner","anytime"]},
+  {name:"Zucchini",          emoji:"🥒", cal:35,  p:2,  c:6,  f:0,  unit:"200g", srv:200, tags:["veg","dinner","anytime"]},
+  {name:"Bell peppers",      emoji:"🫑", cal:40,  p:1,  c:9,  f:0,  unit:"200g", srv:200, tags:["veg","anytime"]},
+  {name:"Cucumber",          emoji:"🥒", cal:30,  p:1,  c:7,  f:0,  unit:"200g", srv:200, tags:["veg","snack","anytime"]},
+  {name:"Mixed salad",       emoji:"🥗", cal:25,  p:2,  c:4,  f:0,  unit:"150g", srv:150, tags:["veg","anytime"]},
+
+  // Healthy fats (small portions)
+  {name:"Avocado",           emoji:"🥑", cal:160, p:2,  c:9,  f:15, unit:"½ avocado", srv:75, tags:["fats","lunch","dinner"]},
+];
+
+// Build dynamic meal suggestions based on remaining macros and what was eaten today/recently
+function getDynamicMealSuggestions(mealCtx, remaining, pLeft, cLeft, fLeft) {
+  // What did we eat today?
+  var todayFoods = ST.nutritionLogs.filter(function(l){ return l.date===today() && l.type==="food"; }).map(function(l){ return (l.name||"").toLowerCase(); });
+  // What have we eaten recently (last 3 days)?
+  var recentFoods = {};
+  ST.nutritionLogs.filter(function(l){ return l.type==="food" && daysAgo(l.date) <= 3; }).forEach(function(l){
+    if(l.name) recentFoods[(l.name||"").toLowerCase()] = (recentFoods[(l.name||"").toLowerCase()]||0)+1;
+  });
+
+  var isDinner = mealCtx==="dinner" || mealCtx==="pack";
+  var isBreakfast = mealCtx==="breakfast";
+
+  // Score each food
+  var scored = HEALTHY_FOODS.map(function(f){
+    var score = 0;
+    // Must fit the meal context
+    if(!f.tags.includes(mealCtx) && !f.tags.includes("anytime")) return null;
+    // Must fit calorie budget (with wiggle room)
+    if(f.cal > remaining + 100) return null;
+    // Penalize high carbs at dinner
+    if(isDinner && f.c > 30) score -= 20;
+    // Reward protein when needed
+    if(pLeft > 30 && f.p >= 15) score += 30;
+    if(pLeft > 30 && f.p >= 25) score += 20;
+    // Reward vegetables
+    if(f.tags.includes("veg")) score += 15;
+    // Reward fiber/complex carbs for breakfast
+    if(isBreakfast && f.tags.includes("fiber")) score += 10;
+    // Penalize recently eaten foods
+    var key = f.name.toLowerCase();
+    if(todayFoods.some(function(t){ return t.includes(key.split(" ")[0]); })) score -= 40;
+    if(recentFoods[key] >= 3) score -= 15;
+    if(recentFoods[key] >= 2) score -= 8;
+    return {food:f, score:score};
+  }).filter(Boolean).sort(function(a,b){ return b.score-a.score; });
+
+  // Build 3 meal combos from top scored foods
+  var combos = [];
+  var used = [];
+
+  // Try to build protein + carb + veg combos
+  var proteins = scored.filter(function(s){ return s.food.tags.includes("protein") && !used.includes(s.food.name); });
+  var carbs = scored.filter(function(s){ return s.food.tags.includes("carbs") && !s.food.tags.includes("protein") && !used.includes(s.food.name); });
+  var vegs = scored.filter(function(s){ return s.food.tags.includes("veg") && !used.includes(s.food.name); });
+
+  for(var i=0; i<3 && proteins.length>i; i++) {
+    var pFood = proteins[i].food;
+    var combo = {foods:[pFood], cal:pFood.cal, p:pFood.p, c:pFood.c, f:pFood.f};
+
+    // Add carb if not dinner and budget allows
+    if(!isDinner && carbs.length > i && combo.cal + carbs[i].food.cal <= remaining + 100) {
+      combo.foods.push(carbs[i].food);
+      combo.cal += carbs[i].food.cal;
+      combo.p += carbs[i].food.p;
+      combo.c += carbs[i].food.c;
+      combo.f += carbs[i].food.f;
+    }
+    // Add veg if budget allows
+    var veg = vegs[i % vegs.length];
+    if(veg && combo.cal + veg.food.cal <= remaining + 150) {
+      combo.foods.push(veg.food);
+      combo.cal += veg.food.cal;
+      combo.p += veg.food.p;
+      combo.c += veg.food.c;
+      combo.f += veg.food.f;
+    }
+
+    var name = combo.foods.map(function(f){ return f.name; }).join(" + ");
+    var desc = combo.foods.map(function(f){ return f.unit; }).join(", ");
+    var emoji = combo.foods[0].emoji;
+    combos.push({name:name, emoji:emoji, desc:desc, cal:Math.round(combo.cal), p:Math.round(combo.p), c:Math.round(combo.c), f:Math.round(combo.f)});
+  }
+
+  return combos.length > 0 ? combos : [
+    {name:"Chicken breast + broccoli", emoji:"🍗", desc:"200g chicken, 200g broccoli", cal:220, p:35, c:11, f:5},
+    {name:"Tilapia + zucchini",        emoji:"🐟", desc:"200g tilapia, 200g zucchini", cal:145, p:25, c:6,  f:2},
+  ];
+}
+
+// Meal suggestions by time slot
+const MEAL_IDEAS = {
+  breakfast: [],
+  lunch: [],
+  dinner: [],
+  snack: [
+    {name:"Whey shake",         emoji:"🥤", cal:130, p:25, c:5, f:2, desc:"1 scoop with water"},
+    {name:"Greek yogurt",       emoji:"🫙", cal:100, p:17, c:6, f:0, desc:"175g fat-free"},
+    {name:"Cottage cheese",     emoji:"🧀", cal:160, p:22, c:6, f:4, desc:"200g low-fat"},
+    {name:"Egg whites",         emoji:"🥚", cal:85,  p:18, c:1, f:0, desc:"6 egg whites"},
+  ],
+};
+
+function buildMealSuggestCard(sum, remaining, pLeft, cLeft, fLeft) {
+  var ctx = getMealContext();
+  var isCalOver = remaining < 0;
+  var isProtDone = pLeft <= 0;
+  var calColor = isCalOver ? "var(--red)" : remaining < 150 ? "var(--yellow)" : "var(--green)";
+  var protColor = isProtDone ? "var(--green)" : pLeft > 50 ? "var(--red)" : "var(--orange)";
+  var mealContext = ST.nutMealContext || ctx.id;
+  // Use dynamic suggestions for meal slots, static for snacks
+  var filteredIdeas = mealContext === "snack" ? MEAL_IDEAS.snack.slice(0,3) :
+    getDynamicMealSuggestions(mealContext, remaining, pLeft, cLeft, fLeft);
+
+  return `
+    <!-- Header: remaining macros -->
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:12px">
+      <div>
+        <div style="font-family:var(--font-d);font-size:38px;letter-spacing:1px;line-height:1;color:${calColor}">${Math.abs(Math.round(remaining))}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px">${isCalOver?"kcal over budget":"kcal remaining"}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-family:var(--font-d);font-size:26px;color:${protColor}">${Math.round(pLeft)}g</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:1px">${isProtDone?"protein goal hit! 💪":"protein still needed"}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${ri(sum.p)} / ${TARGETS.p}g logged</div>
+      </div>
+    </div>
+
+    <!-- Meal context toggle -->
+    <div style="display:flex;gap:5px;margin-bottom:10px;flex-wrap:wrap">
+      ${[{id:"breakfast",label:"🌅 Breakfast"},{id:"lunch",label:"☀️ Lunch"},{id:"dinner",label:"🌙 Dinner"},{id:"lunch",label:"📦 Pack Lunch",pack:true}].map(function(t,i){
+        var isActive = i===3 ? ST.nutMealContext==="pack" : ST.nutMealContext===t.id || (!ST.nutMealContext && t.id===ctx.id && i<3);
+        var tid = i===3 ? "pack" : t.id;
+        return `<button data-meal-ctx="${tid}" style="padding:5px 10px;border-radius:99px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${isActive?"var(--accent)":"var(--border)"};background:${isActive?"rgba(79,142,247,.15)":"var(--bg3)"};color:${isActive?"var(--accent)":"var(--muted)"}">${t.label}</button>`;
+      }).join("")}
+    </div>
+
+    ${isCalOver && isProtDone ? `
+      <div style="background:rgba(34,197,94,.08);border-left:3px solid var(--green);border-radius:0 var(--rs) var(--rs) 0;padding:10px 12px;font-size:12px;color:var(--muted2);margin-bottom:12px">
+        ✅ Protein goal hit — slightly over on calories but macros are solid. One day won't derail progress.
+      </div>` : ""}
+
+    <!-- Meal suggestions -->
+    ${!isCalOver || !isProtDone ? `
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:6px">
+        ${ST.nutMealContext==="pack" ? "📦 Pack for tomorrow's lunch" : (ST.nutMealContext||ctx.id)==="breakfast" ? "🌅 Breakfast ideas" : (ST.nutMealContext||ctx.id)==="lunch" ? "☀️ Lunch ideas" : "🌙 Dinner ideas"}
+        <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted);font-size:10px"> — ${(ST.nutMealContext||ctx.id)==="dinner"||ST.nutMealContext==="pack" ? "light carbs, high protein" : "balanced"}</span>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${filteredIdeas.slice(0,3).map(function(m){
+          var fits = m.cal <= remaining + 50;
+          return `<div style="background:var(--bg3);border-radius:var(--rs);padding:10px 12px;border:1px solid ${fits?"rgba(34,197,94,.2)":"rgba(249,115,22,.2)"}">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="font-size:18px">${m.emoji}</span>
+                <div style="font-weight:700;font-size:13px">${m.name}</div>
+              </div>
+              <div style="font-size:11px;color:${fits?"var(--green)":"var(--orange)"};font-weight:700">${m.cal} kcal</div>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-left:26px">${m.desc} · P:${m.p}g C:${m.c}g F:${m.f}g</div>
+            ${!fits?`<div style="font-size:10px;color:var(--orange);margin-left:26px;margin-top:2px">⚠ ${m.cal-Math.round(remaining)} kcal over — reduce portion</div>`:""}
+          </div>`;
+        }).join("")}
+      </div>
+    </div>` : ""}
+
+    <!-- Food calculator — surgical, no scroll -->
+    <div style="border-top:1px solid var(--border);padding-top:12px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">🔍 What if I eat this?</div>
+      <input id="nut-food-query" class="finput" placeholder="Type a food (e.g. ceviche, chicharrón…)" value="${ST.nutFoodQuery||""}" autocomplete="off" style="margin-bottom:0">
+      <div id="nut-food-results" style="margin-top:6px">${buildFoodCalcResults(remaining, pLeft)}</div>
+    </div>`;
+}
+
+function buildFoodCalcResults(remaining, pLeft) {
+  var q = ST.nutFoodQuery;
+  if(!q || q.length < 2) return '<div style="font-size:11px;color:var(--muted)">Type a food to see how much fits your remaining budget</div>';
+  var matches = searchFoods(q).slice(0,3);
+  if(matches.length === 0) return '<div style="font-size:11px;color:var(--muted)">No match — try a different name</div>';
+  var ctx = getMealContext();
+  var isDinner = (ST.nutMealContext||ctx.id)==="dinner" || ST.nutMealContext==="pack";
+  return '<div style="display:flex;flex-direction:column;gap:6px">' + matches.map(function(f){
+    var calRem = Math.max(0, remaining);
+    var pRem = Math.max(0, pLeft);
+    var maxByCal = calRem > 0 ? Math.floor(calRem / (f.cal/100)) : 500;
+    var gramsForProt = f.p > 0 ? Math.ceil(pRem / (f.p/100)) : null;
+    var ideal = gramsForProt || maxByCal;
+    var idealCal = Math.round(ideal * f.cal / 100);
+    var idealP = Math.round(ideal * f.p / 100);
+    var idealC = Math.round(ideal * f.c / 100);
+    var overCal = idealCal > calRem;
+    var highCarb = isDinner && idealC > 60;
+    var alt = overCal ? maxByCal : null;
+    var altCal = alt ? Math.round(alt * f.cal / 100) : 0;
+    var altP = alt ? Math.round(alt * f.p / 100) : 0;
+    return `<div style="background:var(--bg3);border-radius:var(--rs);padding:10px 12px;border:1px solid ${overCal?"rgba(249,115,22,.3)":highCarb?"rgba(234,179,8,.3)":"rgba(34,197,94,.2)"}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div style="font-weight:700;font-size:13px">${f.n}</div>
+        <div style="font-family:var(--font-d);font-size:22px;color:${overCal?"var(--orange)":"var(--green)"}">${ideal}g</div>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">${idealCal} kcal · +${idealP}g protein · ${idealC}g carbs · ${overCal?`<span style="color:var(--orange)">⚠ ${idealCal-calRem} kcal over</span>`:highCarb?`<span style="color:var(--yellow)">⚠ high carbs for evening</span>`:`<span style="color:var(--green)">fits ✓</span>`}</div>
+      ${overCal && alt ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">Stay in budget: <strong>${alt}g</strong> → ${altCal} kcal · +${altP}g protein</div>` : ""}
+      ${highCarb && !overCal ? `<div style="font-size:11px;color:var(--yellow);margin-top:3px">Evening tip: consider halving to ${Math.round(ideal/2)}g → ${Math.round(idealCal/2)} kcal</div>` : ""}
+    </div>`;
+  }).join("") + "</div>";
+}
+
 function renderNutToday(sum, entries, water, filled) {
   // Macro bars — each bar represents the daily goal, filled portion = consumed
   const bars = [
@@ -2153,135 +2400,7 @@ function renderNutToday(sum, entries, water, filled) {
   </div>
   <div class="card"><div class="ct">Today's Macros</div>${macroRows(sum)}</div>
   <div class="card">
-    <div class="ct">Calorie Budget</div>
-    ${(()=>{
-      const remaining  = TARGETS.cal - sum.cal;
-      const pLeft      = Math.max(0, Math.round(TARGETS.p - ri(sum.p)));
-      const isCalOver  = remaining < 0;
-      const isProtDone = pLeft === 0;
-      const calColor   = isCalOver ? "var(--red)" : remaining < 200 ? "var(--yellow)" : "var(--green)";
-      const protColor  = isProtDone ? "var(--green)" : pLeft > 50 ? "var(--red)" : "var(--orange)";
-
-      // Protein sources — grams needed to hit pLeft, and whether they fit in remaining calories
-      const protSources = [
-        {name:"Whey shake",      pPer100:80,  calPer100:400, unit:"g",    emoji:"🥤", note:"~1 scoop = 30g"},
-        {name:"Chicken breast",  pPer100:31,  calPer100:165, unit:"g",    emoji:"🍗", note:"cooked"},
-        {name:"Greek yogurt",    pPer100:10,  calPer100:73,  unit:"g",    emoji:"🫙", note:"2% fat"},
-        {name:"Cottage cheese",  pPer100:11,  calPer100:90,  unit:"g",    emoji:"🧀", note:"2% fat"},
-        {name:"Egg whites",      pPer100:11,  calPer100:52,  unit:"g",    emoji:"🥚", note:"~3 whites = 100g"},
-        {name:"Tuna (canned)",   pPer100:26,  calPer100:116, unit:"g",    emoji:"🐟", note:"drained"},
-      ];
-
-      const suggestions = protSources.map(s => {
-        const gramsNeeded = pLeft > 0 ? Math.round(pLeft / (s.pPer100/100)) : 0;
-        const calCost = Math.round(gramsNeeded * s.calPer100 / 100);
-        const fits = calCost <= remaining + 100; // 100 kcal wiggle room
-        return {...s, gramsNeeded, calCost, fits};
-      }).filter(s => s.gramsNeeded > 0 && s.gramsNeeded < 800);
-
-      return `
-        <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:14px">
-          <div>
-            <div style="font-family:var(--font-d);font-size:40px;letter-spacing:1px;line-height:1;color:${calColor}">${Math.abs(remaining)}</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:3px">${isCalOver?"kcal over budget":"kcal remaining"}</div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-family:var(--font-d);font-size:28px;letter-spacing:.5px;color:${protColor}">${pLeft}g</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:1px">${isProtDone?"protein goal hit! 💪":"protein still needed"}</div>
-            <div style="font-size:11px;color:var(--muted);margin-top:2px">${ri(sum.p)} / ${TARGETS.p}g logged</div>
-          </div>
-        </div>
-
-        ${isCalOver && isProtDone ? `
-          <div style="background:rgba(34,197,94,.08);border-left:3px solid var(--green);border-radius:0 var(--rs) var(--rs) 0;padding:10px 12px;font-size:12px;color:var(--muted2)">
-            Protein goal hit ✅ — slightly over on calories but macros are solid. One day won't derail progress.
-          </div>
-
-        ` : isCalOver && !isProtDone ? `
-          <div style="background:rgba(239,68,68,.08);border-left:3px solid var(--red);border-radius:0 var(--rs) var(--rs) 0;padding:10px 12px;font-size:12px;color:var(--muted2);margin-bottom:12px">
-            Over on calories but still <strong style="color:var(--red)">${pLeft}g short on protein</strong>. Prioritize low-cal, high-protein options below.
-          </div>
-          <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">High-protein options to close the gap</div>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            ${suggestions.slice(0,4).map(s=>`
-            <div style="display:flex;align-items:center;gap:10px;background:var(--bg3);border-radius:var(--rs);padding:10px 12px;border:1px solid ${s.fits?"rgba(34,197,94,.2)":"var(--border)"}">
-              <div style="font-size:20px">${s.emoji}</div>
-              <div style="flex:1">
-                <div style="font-weight:700;font-size:13px">${s.name} <span style="font-size:11px;color:var(--muted);font-weight:400">${s.note}</span></div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">${s.calCost} kcal · +${pLeft}g protein</div>
-              </div>
-              <div style="text-align:right;flex-shrink:0">
-                <div style="font-family:var(--font-d);font-size:22px;color:${s.fits?"var(--green)":"var(--orange)"}">${s.gramsNeeded}g</div>
-              </div>
-            </div>`).join("")}
-          </div>
-
-        ` : !isProtDone && remaining > 50 ? `
-          <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Hit your protein with these options</div>
-          <div style="display:flex;flex-direction:column;gap:8px">
-            ${suggestions.slice(0,4).map(s=>`
-            <div style="display:flex;align-items:center;gap:10px;background:var(--bg3);border-radius:var(--rs);padding:10px 12px;border:1px solid ${s.fits?"rgba(34,197,94,.2)":"rgba(249,115,22,.2)"}">
-              <div style="font-size:20px">${s.emoji}</div>
-              <div style="flex:1">
-                <div style="font-weight:700;font-size:13px">${s.name} <span style="font-size:11px;color:var(--muted);font-weight:400">${s.note}</span></div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">${s.calCost} kcal · closes ${pLeft}g gap · ${s.fits?`<span style="color:var(--green)">fits budget ✓</span>`:`<span style="color:var(--orange)">${s.calCost-remaining} kcal over</span>`}</div>
-              </div>
-              <div style="text-align:right;flex-shrink:0">
-                <div style="font-family:var(--font-d);font-size:22px;color:${s.fits?"var(--green)":"var(--orange)"}">${s.gramsNeeded}g</div>
-              </div>
-            </div>`).join("")}
-          </div>
-
-        ` : isProtDone && !isCalOver ? `
-          <div style="background:rgba(34,197,94,.08);border-left:3px solid var(--green);border-radius:0 var(--rs) var(--rs) 0;padding:10px 12px;font-size:12px;color:var(--muted2)">
-            Protein goal hit and ${remaining} kcal still available. Fill with carbs around your workout or fats if it's late. 🎯
-          </div>
-        ` : `
-          <div style="font-size:12px;color:var(--muted);text-align:center;padding:8px 0">Almost there — on track! 🎯</div>
-        `}
-
-        <!-- Food calculator -->
-        <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px">
-          <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">🔍 How much can I eat?</div>
-          <div style="position:relative">
-            <input id="nut-food-query" class="finput" placeholder="Type a food (e.g. ceviche, chicharrón…)" value="${ST.nutFoodQuery||""}" autocomplete="off" style="margin-bottom:0">
-          </div>
-          ${(()=>{
-            var q = ST.nutFoodQuery;
-            if(!q || q.length < 2) return '<div style="font-size:11px;color:var(--muted);margin-top:6px">Type a food to see how much you can eat to close your gaps</div>';
-            var matches = searchFoods(q).slice(0,4);
-            if(matches.length === 0) return '<div style="font-size:11px;color:var(--muted);margin-top:6px">No match — try a different name</div>';
-            return '<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">' + matches.map(function(f){
-              var calRemaining = Math.max(0, remaining);
-              var pRemaining = Math.max(0, pLeft);
-              // Max grams based on calories
-              var maxByCalories = calRemaining > 0 ? Math.floor(calRemaining / (f.cal/100)) : 999;
-              // Grams needed to close protein gap
-              var gramsForProtein = f.p > 0 ? Math.ceil(pRemaining / (f.p/100)) : null;
-              // Ideal: close protein gap without exceeding calories
-              var idealGrams = gramsForProtein || maxByCalories;
-              var idealCal = Math.round(idealGrams * f.cal / 100);
-              var idealP = Math.round(idealGrams * f.p / 100);
-              var overCal = idealCal > calRemaining;
-              // If protein portion exceeds calorie budget, show max by calories too
-              var altGrams = overCal ? maxByCalories : null;
-              var altCal = altGrams ? Math.round(altGrams * f.cal / 100) : 0;
-              var altP = altGrams ? Math.round(altGrams * f.p / 100) : 0;
-              return `<div style="background:var(--bg3);border-radius:var(--rs);padding:10px 12px;border:1px solid ${overCal?"rgba(249,115,22,.3)":"rgba(34,197,94,.2)"}">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-                  <div style="font-weight:700;font-size:13px">${f.n}</div>
-                  <div style="font-family:var(--font-d);font-size:22px;color:${overCal?"var(--orange)":"var(--green)"}">${idealGrams}g</div>
-                </div>
-                <div style="font-size:11px;color:var(--muted)">
-                  ${idealCal} kcal · +${idealP}g protein · ${overCal?`<span style="color:var(--orange)">⚠ ${idealCal-calRemaining} kcal over budget</span>`:`<span style="color:var(--green)">fits budget ✓</span>`}
-                </div>
-                ${overCal && altGrams ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">Or stay in budget: <strong>${altGrams}g</strong> (${altCal} kcal · +${altP}g protein)</div>` : ""}
-              </div>`;
-            }).join("") + "</div>";
-          })()}
-        </div>
-      `;
-    })()}
+    <div id="meal-suggest-card">${buildMealSuggestCard(sum, TARGETS.cal - sum.cal, Math.max(0, TARGETS.p - ri(sum.p)), Math.max(0, TARGETS.c - ri(sum.c)), Math.max(0, TARGETS.f - ri(sum.f)))}</div>
   </div>
   <div class="card" id="water-card">
     <div class="ct">Water — ${water.toFixed(1)}L / ${TARGETS.water}L</div>
@@ -3384,7 +3503,7 @@ function renderChartWB() {
     ]},
     options:{responsive:true,maintainAspectRatio:false,interaction:{mode:"index",intersect:false},
       plugins:{legend:{display:false},tooltip:{backgroundColor:"rgba(18,18,26,.95)",borderColor:"#2a2a3a",borderWidth:1,titleColor:"#f0f0f8",bodyColor:"#9090aa",callbacks:{label:function(ctx){return ctx.dataset.label+": "+ctx.parsed.y+(ctx.datasetIndex===1?"%":" lbs");}}}},
-      scales:{x:{ticks:{color:tickColor,font:{size:9},maxRotation:45},grid:{color:gridColor}},y:{position:"left",ticks:{color:"#4f8ef7",font:{size:9},callback:v=>v+" lbs"},grid:{color:gridColor},title:{display:true,text:"Weight",color:"#4f8ef7",font:{size:10}}},y2:{position:"right",ticks:{color:"#ef4444",font:{size:9},callback:v=>v+"%"},grid:{drawOnChartArea:false},title:{display:true,text:"Body Fat %",color:"#ef4444",font:{size:10}}}}}
+      scales:{x:{ticks:{color:tickColor,font:{size:9},maxRotation:45},grid:{color:gridColor}},y:{position:"left",ticks:{color:"#4f8ef7",font:{size:9},callback:v=>v+" lbs"},grid:{color:gridColor},title:{display:true,text:"Weight",color:"#4f8ef7",font:{size:10}}},y2:{position:"right",ticks:{color:"#ef4444",font:{size:9},callback:function(v){return parseFloat(v).toFixed(1)+"%";}},grid:{drawOnChartArea:false},title:{display:true,text:"Body Fat %",color:"#ef4444",font:{size:10}}}}}
   });
 }
 
@@ -4050,14 +4169,23 @@ function attachAll() {
     setTimeout(()=>document.getElementById("food-search-input")?.focus(),100);
   }));
 
-  // NUT FOOD CALCULATOR
+  // NUT FOOD CALCULATOR — surgical update, never full render
   var nfqEl = document.getElementById("nut-food-query");
   if(nfqEl) nfqEl.addEventListener("input", function(){
     ST.nutFoodQuery = nfqEl.value;
-    // Re-render just the calorie budget card
-    var pg=document.getElementById("pg"); var sy=pg?pg.scrollTop:0;
-    render(); if(pg)pg.scrollTop=sy;
+    var remaining = TARGETS.cal - (ST.nutritionLogs.filter(function(l){return l.date===today()&&l.type==="food";}).reduce(function(a,l){return a+(l.cal||0);},0));
+    var pLeft = Math.max(0, TARGETS.p - ST.nutritionLogs.filter(function(l){return l.date===today()&&l.type==="food";}).reduce(function(a,l){return a+(l.p||0);},0));
+    var resultsEl = document.getElementById("nut-food-results");
+    if(resultsEl) resultsEl.innerHTML = buildFoodCalcResults(remaining, pLeft);
   });
+
+  // MEAL CONTEXT PILLS — surgical update
+  $$("[data-meal-ctx]").forEach(el=>el.addEventListener("click",()=>{
+    var pg=document.getElementById("pg"); var sy=pg?pg.scrollTop:0;
+    ST.nutMealContext = el.dataset.mealCtx;
+    render();
+    requestAnimationFrame(function(){ var pg2=document.getElementById("pg"); if(pg2) pg2.scrollTop=sy; });
+  }));
 
   // NUTRITION TAB
   $$("[data-nut-tab]").forEach(el=>el.addEventListener("click",()=>{
