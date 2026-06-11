@@ -579,7 +579,7 @@ const ST = {
   prChartEx: null,
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {}, showDayPicker: false, extraExercises: [], exSearchQ: "",
   restTimer: null,
-  showBodyModal: false, showFoodModal: false, showTargetEditor: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]}, breakdown: null,
+  showBodyModal: false, showFoodModal: false, showTargetEditor: false, showSettings: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]}, breakdown: null,
   expandedLog: null,
   foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""}, photoLookingUp: false,
   nutTab: "today",
@@ -929,9 +929,9 @@ function autoCheckSet(eid, si) {
     if(chk) { chk.className="schk done"; chk.textContent="✓"; }
     var row = chk && chk.closest(".set-row");
     if(row) { var sn=row.querySelector(".snum"); if(sn) sn.className="snum done"; }
-    // Start rest timer
+    // Start rest timer only if enabled in settings
     var exPlan = ST.activeDay && PLAN[ST.activeDay] ? PLAN[ST.activeDay].exercises.find(function(e){return e.id===eid;}) : null;
-    if(exPlan) startTimer(exPlan.rest);
+    if(exPlan && APP_SETTINGS.restTimerEnabled) startTimer(exPlan.rest);
     // Update border color
     var allSets=ST.activeSets[eid]||[], allDone=allSets.length>0&&allSets.every(function(s){return s.done;});
     var exBlock=document.getElementById("ex-"+eid);
@@ -1427,7 +1427,7 @@ function render() {
   // Destroy existing charts before rebuilding DOM
   if(ST.charts) Object.values(ST.charts).forEach(c=>{try{c.destroy();}catch{}});
   ST.charts = {};
-  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}${ST.editingLog?renderEditLogModal():""}${ST.editingCustomFood?renderEditCustomFoodModal():""}${ST.tempoPopup?renderTempoPopup():""}${ST.showMealBuilder?renderMealBuilder():""}${ST.showTargetEditor?renderTargetEditor():""}`;
+  document.getElementById("app").innerHTML = `<div class="page" id="pg">${renderPage()}</div>${renderNav()}${ST.restTimer?renderTimer():""}${ST.showBodyModal?renderBodyModal():""}${ST.showFoodModal?renderFoodModal():""}${ST.showCheatPanel?renderCheatPanel():""}${ST.editingLog?renderEditLogModal():""}${ST.editingCustomFood?renderEditCustomFoodModal():""}${ST.tempoPopup?renderTempoPopup():""}${ST.showMealBuilder?renderMealBuilder():""}${ST.showTargetEditor?renderTargetEditor():""}${ST.showSettings?renderSettings():""}`;
   attachAll();
   renderCharts();
 }
@@ -1623,11 +1623,17 @@ function renderDashboard() {
   const evalReady=!lastReport||daysAgo(lastReport.date)>=14;
 
   return `
-  <div class="ph"><div class="pt">DIEGO'S TRACKER</div><div class="ps">${(()=>{
-    const firstLog = ST.workoutLogs.length > 0 ? ST.workoutLogs[ST.workoutLogs.length-1].date : null;
-    const weekLabel = firstLog ? "Training week " + Math.ceil((daysAgo(firstLog)+1)/7) : new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"});
-    return weekLabel;
-  })()} · ${wl.length}/6 sessions · <span style="color:${ST.online?'var(--green)':'var(--orange)'}">${ST.online?'● Synced':'● Offline — reopen to sync'}</span></div></div>
+  <div class="ph" style="display:flex;align-items:flex-start;justify-content:space-between">
+    <div>
+      <div class="pt">DIEGO'S TRACKER</div>
+      <div class="ps">${(()=>{
+        const firstLog = ST.workoutLogs.length > 0 ? ST.workoutLogs[ST.workoutLogs.length-1].date : null;
+        const weekLabel = firstLog ? "Training week " + Math.ceil((daysAgo(firstLog)+1)/7) : new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"});
+        return weekLabel;
+      })()} · ${wl.length}/6 sessions · <span style="color:${ST.online?'var(--green)':'var(--orange)'}">${ST.online?'● Synced':'● Offline — reopen to sync'}</span></div>
+    </div>
+    <button data-action="open-settings" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:8px 10px;font-size:16px;cursor:pointer;color:var(--muted);flex-shrink:0;margin-top:4px">⚙️</button>
+  </div>
 
   <div class="wbanner"><div class="wname">LET'S GO,<br>DIEGO.</div><div class="wsub">${latest.weight?`${latest.weight} lbs · ${latest.bf}% BF · ${getLean(latest.weight,latest.bf)||"—"} lbs lean mass`:"Tap Body tab to log your first entry"}</div></div>
 
@@ -2909,6 +2915,40 @@ function renderMealBuilder() {
   </div></div>`;
 }
 
+// Settings — persisted to localStorage
+var APP_SETTINGS = {
+  restTimerEnabled: true,
+};
+function loadSettings() {
+  var saved = S.get("app_settings", null);
+  if(saved) Object.assign(APP_SETTINGS, saved);
+}
+function saveSettings() { S.set("app_settings", APP_SETTINGS); }
+
+function renderSettings() {
+  return `<div class="moverlay" data-action="close-settings"><div class="modal" onclick="event.stopPropagation()">
+    <div class="mhandle"></div>
+    <div class="mtitle">SETTINGS</div>
+
+    <!-- Workout -->
+    <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🏋️ Workout</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-weight:600;font-size:14px">Rest Timer</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:2px">Auto-start timer after checking off a set</div>
+      </div>
+      <div data-toggle="restTimerEnabled" style="width:44px;height:26px;border-radius:99px;background:${APP_SETTINGS.restTimerEnabled?"var(--accent)":"var(--border)"};cursor:pointer;position:relative;transition:background .2s;flex-shrink:0">
+        <div style="position:absolute;top:3px;left:${APP_SETTINGS.restTimerEnabled?"21px":"3px"};width:20px;height:20px;border-radius:50%;background:white;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>
+      </div>
+    </div>
+
+    <div style="height:20px"></div>
+    <div style="font-size:11px;color:var(--muted);text-align:center">More settings coming soon</div>
+    <div style="height:8px"></div>
+    <button class="btn bp bfull" data-action="close-settings" style="margin-top:8px">Done</button>
+  </div></div>`;
+}
+
 function renderTargetEditor() {
   return `<div class="moverlay" data-action="close-targets"><div class="modal" onclick="event.stopPropagation()">
     <div class="mhandle"></div>
@@ -3868,7 +3908,7 @@ function attachAll() {
     ST.activeSets[eid][si].done=!ST.activeSets[eid][si].done;
     if(ST.activeSets[eid][si].done) {
       const ex=PLAN[ST.activeDay]?.exercises.find(e=>e.id===eid);
-      if(ex) startTimer(ex.rest);
+      if(ex && APP_SETTINGS.restTimerEnabled) startTimer(ex.rest);
     }
     // Surgical: just update the checkmark visually
     el.className="schk"+(ST.activeSets[eid][si].done?" done":"");
@@ -4100,6 +4140,18 @@ function attachAll() {
     }
     saveBodyStat(stat); ST.showBodyModal=false; ST.editingStat=null; render();
   });
+  // SETTINGS
+  $("[data-action='open-settings']")?.addEventListener("click",()=>{ST.showSettings=true;render();});
+  $("[data-action='close-settings']")?.addEventListener("click",()=>{ST.showSettings=false;render();});
+  $$("[data-toggle]").forEach(el=>el.addEventListener("click",()=>{
+    var key=el.dataset.toggle;
+    if(key in APP_SETTINGS) {
+      APP_SETTINGS[key]=!APP_SETTINGS[key];
+      saveSettings();
+      render();
+    }
+  }));
+
   // TARGET EDITOR
   $("[data-action='open-targets']")?.addEventListener("click",()=>{ST.showTargetEditor=true;render();});
   $("[data-action='close-targets']")?.addEventListener("click",()=>{ST.showTargetEditor=false;render();});
@@ -4843,6 +4895,7 @@ function loadFromCache() {
 
 function boot() {
   loadTargets();
+  loadSettings();
   loadWorkoutProgress();
   showLoader();
 
