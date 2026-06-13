@@ -667,8 +667,22 @@ function saveWaterLog(entry) {
   sbUpsert("nutrition_logs", { id:entry.id, date:entry.date, type:"water", liters:entry.liters, created_at:clientTs() });
 }
 function saveAIReport(report) {
+  // Save to localStorage immediately
   save();
-  sbUpsert("ai_reports", { id:report.id, date:report.date, window_start:report.windowStart||null, report:report.report, notes:report.notes||null, snapshot:report.snapshot, created_at:clientTs() });
+  // Save to Supabase — only send columns that exist in the table
+  var payload = {
+    id: report.id,
+    date: report.date,
+    report: report.report,
+    snapshot: report.snapshot,
+    created_at: clientTs()
+  };
+  // Add optional columns only if they exist (won't break if they don't)
+  if(report.windowStart) payload.window_start = report.windowStart;
+  if(report.notes) payload.notes = report.notes;
+  sbUpsert("ai_reports", payload).then(function(ok){
+    if(!ok) console.warn("saveAIReport: Supabase upsert failed");
+  });
 }
 function deleteFromCloud(table, id) { sbDelete(table, id); }
 function syncToCloud(t, r)          { sbUpsert(t, r); }
@@ -1333,13 +1347,20 @@ MY NOTES FOR THIS PERIOD:
 ${ST.aiNotes && ST.aiNotes.trim() ? `"${ST.aiNotes.trim()}"` : "No notes provided"}
 
 Respond with a JSON object with two fields:
-1. "report": markdown string with these exact sections:
+1. "report": markdown string with these exact sections. Use proper markdown formatting with blank lines between sections, bullet points starting with "- ", and **bold** for emphasis. Each section must have a blank line after the header:
+
 ### 📊 Progress Summary
+
 ### ✅ What's Working
+
 ### ⚠️ What Needs Attention
-### 🍽️ Nutrition & Food Quality (analyze his actual foods — keep, swap, add)
+
+### 🍽️ Nutrition & Food Quality
+
 ### 🏋️ Training Adjustments
-### 😴 Recovery (sleep, hydration, steps)
+
+### 😴 Recovery
+
 ### 🎯 Next Period — 3 numbered priorities
 
 2. "suggestions": array of 0-4 specific actionable changes. Each suggestion:
@@ -1379,9 +1400,9 @@ Only suggest changes with clear data evidence. For exercise swaps use exact exer
     const report={id:Date.now().toString(), date:today(), windowStart:lastReport ? lastReport.date : periodDays[0]?.date, report:reportText, notes:ST.aiNotes||"", snapshot:{sessions:sessionCount,protHit,avgNut,weight:bs[0]?.weight,bf:bs[0]?.bf}};
     ST.aiReports.unshift(report);
     ST.aiSuggestions = suggestions.map(function(s){ return Object.assign({}, s, {dismissed:false}); });
-    ST.aiNotes = ""; // clear after running
-    saveAIReport(report);
-    save();
+    ST.aiNotes = "";
+    save(); // Save to localStorage FIRST before anything async
+    saveAIReport(report); // Then try Supabase (async, won't block)
   } catch(e) {
     const report={id:Date.now().toString(), date:today(), report:"### ⚠️ Connection Error\n\nCouldn't reach AI. Make sure you're online and try again.\n\nError: "+e.message, snapshot:{}};
     ST.aiReports.unshift(report);
@@ -2026,7 +2047,10 @@ function renderWorkoutSession() {
             ${added?"Added":"+ Add"}
           </div>
         </div>`;
-      }).join("")}</div>` : exSearchQ.length >= 1 ? `<div style="padding:8px;font-size:12px;color:var(--muted)">No matches — try a different name or muscle group</div>` : ""}
+      }).join("")}</div>` : exSearchQ.length >= 1 ? `<div style="padding:10px;background:var(--bg3);border-radius:var(--rs);margin-top:4px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">No matches for "${exSearchQ}" — ask Claude?</div>
+        <button id="ask-claude-ex-btn" class="btn bpur bfull" style="font-size:12px;padding:8px">🤖 Add "${exSearchQ}" via Claude</button>
+      </div>` : ""}
     </div>
   </div>
 
@@ -2928,7 +2952,10 @@ function saveSettings() { S.set("app_settings", APP_SETTINGS); }
 function renderSettings() {
   return `<div class="moverlay" data-action="close-settings"><div class="modal" onclick="event.stopPropagation()">
     <div class="mhandle"></div>
-    <div class="mtitle">SETTINGS</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div class="mtitle" style="margin-bottom:0">SETTINGS</div>
+      <button id="close-settings-btn" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:4px">✕</button>
+    </div>
 
     <!-- Workout -->
     <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">🏋️ Workout</div>
@@ -2937,15 +2964,13 @@ function renderSettings() {
         <div style="font-weight:600;font-size:14px">Rest Timer</div>
         <div style="font-size:12px;color:var(--muted);margin-top:2px">Auto-start timer after checking off a set</div>
       </div>
-      <div data-toggle="restTimerEnabled" style="width:44px;height:26px;border-radius:99px;background:${APP_SETTINGS.restTimerEnabled?"var(--accent)":"var(--border)"};cursor:pointer;position:relative;transition:background .2s;flex-shrink:0">
+      <div id="toggle-restTimerEnabled" style="width:44px;height:26px;border-radius:99px;background:${APP_SETTINGS.restTimerEnabled?"var(--accent)":"var(--border)"};cursor:pointer;position:relative;transition:background .2s;flex-shrink:0">
         <div style="position:absolute;top:3px;left:${APP_SETTINGS.restTimerEnabled?"21px":"3px"};width:20px;height:20px;border-radius:50%;background:white;transition:left .2s;box-shadow:0 1px 3px rgba(0,0,0,.3)"></div>
       </div>
     </div>
 
     <div style="height:20px"></div>
     <div style="font-size:11px;color:var(--muted);text-align:center">More settings coming soon</div>
-    <div style="height:8px"></div>
-    <button class="btn bp bfull" data-action="close-settings" style="margin-top:8px">Done</button>
   </div></div>`;
 }
 
@@ -4051,10 +4076,51 @@ function attachAll() {
           el2.addEventListener("click", function(e){ e.stopPropagation(); addExerciseToSession(el2.dataset.addEx); });
         });
       } else if(exSearchEl.value.length >= 1) {
-        rEl.innerHTML = `<div style="padding:8px;font-size:12px;color:var(--muted)">No matches — try a different name or muscle group</div>`;
+        var q = exSearchEl.value;
+        rEl.innerHTML = `<div style="padding:10px;background:var(--bg3);border-radius:var(--rs);margin-top:4px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:8px">No matches for "${q}" — ask Claude?</div>
+          <button id="ask-claude-ex-btn" class="btn bpur bfull" style="font-size:12px;padding:8px">🤖 Add "${q}" via Claude</button>
+        </div>`;
+        attachAskClaudeEx(q);
       } else { rEl.innerHTML = ""; }
     }
   });
+
+  function attachAskClaudeEx(query) {
+    var btn = document.getElementById("ask-claude-ex-btn");
+    if(!btn) return;
+    btn.addEventListener("click", async function(e){
+      e.stopPropagation();
+      btn.textContent = "Looking up…"; btn.disabled = true;
+      try {
+        var resp = await fetch("https://fitness-proxy.leonsilvadiego.workers.dev", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({model:"claude-sonnet-4-5", max_tokens:300, messages:[{role:"user",
+            content:`Give me the exercise info for "${query}". Respond ONLY with JSON:
+{"name":"exact exercise name","muscle":"primary muscle group","type":"compound|isolation|bodyweight|cardio","sets":3,"reps":"8-12","rest":"90s","steps":["step 1","step 2"],"proTip":"one tip"}`}]})
+        });
+        var json = JSON.parse(await resp.text());
+        var text = (json.content&&json.content[0]&&json.content[0].text)||"";
+        var match = text.match(/\{[\s\S]*\}/);
+        if(match) {
+          var ex = JSON.parse(match[0]);
+          if(ex.name) {
+            // Save to EXERCISE_LIBRARY for future searches
+            var newEx = {id:ex.name.toLowerCase().replace(/\s+/g,"_"), name:ex.name, muscle:ex.muscle||"Unknown", type:ex.type||"isolation"};
+            EXERCISE_LIBRARY.push(newEx);
+            // Add to session
+            addExerciseToSession(JSON.stringify(Object.assign({}, newEx, {sets:ex.sets||3, reps:ex.reps||"8-12", rest:ex.rest||"90s", steps:ex.steps||[], proTip:ex.proTip||""})));
+            return;
+          }
+        }
+        throw new Error("Could not parse exercise");
+      } catch(err) {
+        console.log("Exercise lookup error:", err);
+        btn.textContent = "🤖 Try Again"; btn.disabled = false;
+      }
+    });
+  }
+  attachAskClaudeEx(ST.exSearchQ);
 
   // ADD EXERCISE from search results
   $$("[data-add-ex]").forEach(el=>el.addEventListener("click",e=>{
@@ -4143,14 +4209,22 @@ function attachAll() {
   // SETTINGS
   $("[data-action='open-settings']")?.addEventListener("click",()=>{ST.showSettings=true;render();});
   $("[data-action='close-settings']")?.addEventListener("click",()=>{ST.showSettings=false;render();});
-  $$("[data-toggle]").forEach(el=>el.addEventListener("click",()=>{
-    var key=el.dataset.toggle;
-    if(key in APP_SETTINGS) {
-      APP_SETTINGS[key]=!APP_SETTINGS[key];
-      saveSettings();
-      render();
+  document.getElementById("close-settings-btn")?.addEventListener("click",function(e){
+    e.stopPropagation(); ST.showSettings=false; render();
+  });
+  // Toggle switches — surgical update, no page scroll
+  document.getElementById("toggle-restTimerEnabled")?.addEventListener("click",function(e){
+    e.stopPropagation();
+    APP_SETTINGS.restTimerEnabled = !APP_SETTINGS.restTimerEnabled;
+    saveSettings();
+    // Update toggle visually without full render
+    var el = document.getElementById("toggle-restTimerEnabled");
+    if(el) {
+      el.style.background = APP_SETTINGS.restTimerEnabled ? "var(--accent)" : "var(--border)";
+      var knob = el.querySelector("div");
+      if(knob) knob.style.left = APP_SETTINGS.restTimerEnabled ? "21px" : "3px";
     }
-  }));
+  });
 
   // TARGET EDITOR
   $("[data-action='open-targets']")?.addEventListener("click",()=>{ST.showTargetEditor=true;render();});
@@ -4920,7 +4994,11 @@ function boot() {
       ST.workoutLogs   = wl.map(function(r)  { return {id:r.id, dayId:r.day_id, date:r.date, duration:r.duration, exercises:r.exercises||[]}; });
       ST.bodyStats     = bs.map(function(r)  { return {id:r.id, date:r.date, weight:r.weight, bf:r.bf, waist:r.waist, chest:r.chest, hips:r.hips, r_arm:r.r_arm, l_arm:r.l_arm, r_thigh:r.r_thigh, l_thigh:r.l_thigh, sleep:r.sleep, notes:r.notes, photo_path:r.photo_path||null}; });
       ST.nutritionLogs = nl.map(function(r)  { return {id:r.id, date:r.date, type:r.type, name:r.name, grams:r.grams, cal:r.cal, p:r.p, c:r.c, f:r.f, liters:r.liters}; });
-      ST.aiReports     = air.map(function(r) { return {id:r.id, date:r.date, windowStart:r.window_start||null, report:r.report, notes:r.notes||"", snapshot:r.snapshot}; });
+      const airFromSupabase = air.map(function(r) { return {id:r.id, date:r.date, windowStart:r.window_start||null, report:r.report, notes:r.notes||"", snapshot:r.snapshot}; });
+      // Merge: keep any local reports not yet in Supabase, then add Supabase ones
+      const localIds = new Set(airFromSupabase.map(function(r){return r.id;}));
+      const localOnly = ST.aiReports.filter(function(r){return !localIds.has(r.id);});
+      ST.aiReports = localOnly.concat(airFromSupabase).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
       ST.customFoods   = (cf||[]).map(function(r) { return {id:r.id, n:r.name, cal:r.cal, p:r.p, c:r.c, f:r.f, cat:r.cat||"Custom", serving_label:r.serving_label, serving_grams:r.serving_grams, food_type:r.food_type||"A", source:r.source||"claude"}; });
       ST.dailyLogs     = (dl||[]).map(function(r) { return {id:r.id, date:r.date, steps:r.steps, sleep_hours:r.sleep_hours}; });
       S.set("wl",  ST.workoutLogs);
