@@ -250,8 +250,12 @@ var SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 function sbHeaders() {
   return { "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY, "Content-Type": "application/json" };
 }
-function sbSelect(table) {
-  return fetch(SUPA_URL + "/rest/v1/" + table + "?select=*&order=created_at.desc", { headers: sbHeaders() })
+function sbSelect(table, orderCol) {
+  var order = orderCol || "created_at";
+  // Tables without created_at use key ordering
+  if(table === "user_settings") order = "key";
+  if(table === "custom_exercises") order = "id";
+  return fetch(SUPA_URL + "/rest/v1/" + table + "?select=*&order=" + order + ".desc", { headers: sbHeaders() })
     .then(function(r) { return r.ok ? r.json() : null; })
     .catch(function() { return null; });
 }
