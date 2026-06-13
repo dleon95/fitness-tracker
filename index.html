@@ -559,7 +559,10 @@ function loadTargets() {
   var saved = S.get("targets", null);
   if(saved && saved.cal) Object.assign(TARGETS, saved);
 }
-function saveTargets() { S.set("targets", TARGETS); }
+function saveTargets() {
+  S.set("targets", TARGETS);
+  sbUpsert("user_settings", {key:"targets", value:TARGETS, updated_at:clientTs()});
+}
 
 const ST = {
   tab: "dashboard",
@@ -2947,7 +2950,10 @@ function loadSettings() {
   var saved = S.get("app_settings", null);
   if(saved) Object.assign(APP_SETTINGS, saved);
 }
-function saveSettings() { S.set("app_settings", APP_SETTINGS); }
+function saveSettings() {
+  S.set("app_settings", APP_SETTINGS);
+  sbUpsert("user_settings", {key:"app_settings", value:APP_SETTINGS, updated_at:clientTs()});
+}
 
 function renderSettings() {
   return `<div class="moverlay" data-action="close-settings"><div class="modal" onclick="event.stopPropagation()">
@@ -4105,9 +4111,15 @@ function attachAll() {
         if(match) {
           var ex = JSON.parse(match[0]);
           if(ex.name) {
-            // Save to EXERCISE_LIBRARY for future searches
+            // Save to EXERCISE_LIBRARY and persist to localStorage + Supabase
             var newEx = {id:ex.name.toLowerCase().replace(/\s+/g,"_"), name:ex.name, muscle:ex.muscle||"Unknown", type:ex.type||"isolation"};
             EXERCISE_LIBRARY.push(newEx);
+            var customExercises = S.get("custom_exercises", []);
+            if(!customExercises.find(function(e){return e.id===newEx.id;})) {
+              customExercises.push(newEx);
+              S.set("custom_exercises", customExercises);
+              sbUpsert("custom_exercises", {id:newEx.id, name:newEx.name, muscle:newEx.muscle, type:newEx.type, created_at:clientTs()});
+            }
             // Add to session
             addExerciseToSession(JSON.stringify(Object.assign({}, newEx, {sets:ex.sets||3, reps:ex.reps||"8-12", rest:ex.rest||"90s", steps:ex.steps||[], proTip:ex.proTip||""})));
             return;
@@ -4971,6 +4983,13 @@ function boot() {
   loadTargets();
   loadSettings();
   loadWorkoutProgress();
+  // Load custom exercises saved via Claude into the library
+  var customExercises = S.get("custom_exercises", []);
+  customExercises.forEach(function(ex){
+    if(!EXERCISE_LIBRARY.find(function(e){return e.id===ex.id;})) {
+      EXERCISE_LIBRARY.push(ex);
+    }
+  });
   showLoader();
 
   // Set a 6 second timeout — if Supabase doesn't respond, use cache
@@ -4985,22 +5004,38 @@ function boot() {
     sbSelect("nutrition_logs"),
     sbSelect("ai_reports"),
     sbSelect("custom_foods"),
-    sbSelect("daily_logs")
+    sbSelect("daily_logs"),
+    sbSelect("custom_exercises"),
+    sbSelect("user_settings")
   ]).then(function(results) {
     clearTimeout(timer);
-    var wl = results[0], bs = results[1], nl = results[2], air = results[3], cf = results[4], dl = results[5];
+    var wl = results[0], bs = results[1], nl = results[2], air = results[3], cf = results[4], dl = results[5], ce = results[6], us = results[7];
 
     if(wl !== null) {
       ST.workoutLogs   = wl.map(function(r)  { return {id:r.id, dayId:r.day_id, date:r.date, duration:r.duration, exercises:r.exercises||[]}; });
       ST.bodyStats     = bs.map(function(r)  { return {id:r.id, date:r.date, weight:r.weight, bf:r.bf, waist:r.waist, chest:r.chest, hips:r.hips, r_arm:r.r_arm, l_arm:r.l_arm, r_thigh:r.r_thigh, l_thigh:r.l_thigh, sleep:r.sleep, notes:r.notes, photo_path:r.photo_path||null}; });
       ST.nutritionLogs = nl.map(function(r)  { return {id:r.id, date:r.date, type:r.type, name:r.name, grams:r.grams, cal:r.cal, p:r.p, c:r.c, f:r.f, liters:r.liters}; });
       const airFromSupabase = air.map(function(r) { return {id:r.id, date:r.date, windowStart:r.window_start||null, report:r.report, notes:r.notes||"", snapshot:r.snapshot}; });
-      // Merge: keep any local reports not yet in Supabase, then add Supabase ones
       const localIds = new Set(airFromSupabase.map(function(r){return r.id;}));
       const localOnly = ST.aiReports.filter(function(r){return !localIds.has(r.id);});
       ST.aiReports = localOnly.concat(airFromSupabase).sort(function(a,b){return new Date(b.date)-new Date(a.date);});
       ST.customFoods   = (cf||[]).map(function(r) { return {id:r.id, n:r.name, cal:r.cal, p:r.p, c:r.c, f:r.f, cat:r.cat||"Custom", serving_label:r.serving_label, serving_grams:r.serving_grams, food_type:r.food_type||"A", source:r.source||"claude"}; });
       ST.dailyLogs     = (dl||[]).map(function(r) { return {id:r.id, date:r.date, steps:r.steps, sleep_hours:r.sleep_hours}; });
+
+      // Load custom exercises into library
+      (ce||[]).forEach(function(r){
+        var ex = {id:r.id, name:r.name, muscle:r.muscle||"Unknown", type:r.type||"isolation"};
+        if(!EXERCISE_LIBRARY.find(function(e){return e.id===ex.id;})) EXERCISE_LIBRARY.push(ex);
+        var localCe = S.get("custom_exercises", []);
+        if(!localCe.find(function(e){return e.id===ex.id;})) { localCe.push(ex); S.set("custom_exercises", localCe); }
+      });
+
+      // Load user settings (targets + app settings)
+      (us||[]).forEach(function(r){
+        if(r.key==="targets" && r.value) { Object.assign(TARGETS, r.value); S.set("targets", TARGETS); }
+        if(r.key==="app_settings" && r.value) { Object.assign(APP_SETTINGS, r.value); S.set("app_settings", APP_SETTINGS); }
+      });
+
       S.set("wl",  ST.workoutLogs);
       S.set("bs",  ST.bodyStats);
       S.set("nl",  ST.nutritionLogs);
