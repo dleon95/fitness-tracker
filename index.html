@@ -1300,16 +1300,25 @@ async function runAI() {
   const stepsDays = periodDays.filter(d=>d.steps>0);
   const avgSteps = stepsDays.length>0 ? Math.round(stepsDays.reduce((a,d)=>a+d.steps,0)/stepsDays.length) : null;
 
-  const mainLifts = ["Back Squat","Barbell Bench Press","Barbell Hip Thrust","Pull-Up / Assisted","Barbell Bent-Over Row","Romanian Deadlift"];
+  // Dynamic lift progression — any exercise logged 2+ times in the period
   const liftProg = {};
-  mainLifts.forEach(name=>{
-    const h=[];
-    periodSessions.slice().reverse().forEach(log=>{
-      const ex=log.exercises?.find(e=>e.name===name);
-      if(ex){const best=Math.max(...(ex.sets||[]).map(s=>parseFloat(s.weight)||0));if(best>0)h.push({date:log.date,best});}
+  periodSessions.forEach(function(log){
+    (log.exercises||[]).forEach(function(ex){
+      if(!ex.name) return;
+      var best = Math.max(...(ex.sets||[]).map(function(s){return parseFloat(s.weight)||0;}));
+      if(best > 0) {
+        if(!liftProg[ex.name]) liftProg[ex.name] = [];
+        liftProg[ex.name].push({date:log.date, best:best});
+      }
     });
-    liftProg[name]=h.slice(-8);
   });
+  // Sort each exercise history by date and filter to 2+ sessions only
+  Object.keys(liftProg).forEach(function(name){
+    liftProg[name].sort(function(a,b){return new Date(a.date)-new Date(b.date);});
+  });
+  const trackedLifts = Object.fromEntries(
+    Object.entries(liftProg).filter(function([n,h]){return h.length>=2;})
+  );
 
   // Current workout plan summary for exercise suggestions
   const planSummary = DAY_ORDER.map(d=>`${d}: ${PLAN[d].exercises.map(e=>e.name+"(${e.sets}×${e.reps})").join(", ")}`).join("\n");
@@ -1331,8 +1340,8 @@ ${DAY_ORDER.map(d=>{const c=ST.workoutLogs.filter(l=>l.dayId===d&&daysAgo(l.date
 CURRENT WORKOUT PLAN:
 ${planSummary}
 
-LIFT PROGRESSION (lbs, this period):
-${Object.entries(liftProg).map(([n,h])=>n+": "+(h.length?h.map(x=>x.date.slice(5)+":"+x.best).join(" → "):"no data")).join("\n")}
+LIFT PROGRESSION (lbs, this period — all exercises logged 2+ times):
+${Object.entries(trackedLifts).map(([n,h])=>n+": "+h.map(x=>x.date.slice(5)+":"+x.best).join(" → ")).join("\n")||"Not enough data yet (need 2+ sessions per exercise)"}
 
 TOP PRs (all time): ${prs.map(([n,p])=>n+": "+p.weight+"lbs").join(", ")||"none yet"}
 
