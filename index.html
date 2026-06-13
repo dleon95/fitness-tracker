@@ -1399,17 +1399,35 @@ Only suggest changes with clear data evidence. For exercise swaps use exact exer
   try {
     const resp = await fetch("https://fitness-proxy.leonsilvadiego.workers.dev", {
       method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({model:"claude-sonnet-4-5", max_tokens:2000, messages:[{role:"user",content:prompt}]})
+      body: JSON.stringify({model:"claude-sonnet-4-5", max_tokens:4096, messages:[{role:"user",content:prompt}]})
     });
     const json = await resp.json();
     const text = json.content?.[0]?.text || "";
     let reportText = text, suggestions = [];
     try {
+      // Try to extract JSON object
       const match = text.match(/\{[\s\S]*\}/);
       if(match) {
-        const parsed = JSON.parse(match[0]);
-        reportText = parsed.report || text;
-        suggestions = parsed.suggestions || [];
+        // Try parsing the full JSON first
+        try {
+          const parsed = JSON.parse(match[0]);
+          reportText = parsed.report || text;
+          suggestions = parsed.suggestions || [];
+        } catch(jsonErr) {
+          // JSON is malformed (e.g. truncated suggestions) — extract report field directly
+          const reportMatch = match[0].match(/"report"\s*:\s*"([\s\S]*?)(?:"\s*,\s*"suggestions"|"\s*\})/);
+          if(reportMatch) {
+            reportText = reportMatch[1]
+              .replace(/\\n/g, "\n")
+              .replace(/\\"/g, '"')
+              .replace(/\\\\/g, "\\");
+          }
+          // Try to extract suggestions even if truncated
+          try {
+            const sugMatch = match[0].match(/"suggestions"\s*:\s*(\[[\s\S]*?\])/);
+            if(sugMatch) suggestions = JSON.parse(sugMatch[1]);
+          } catch(e3) { suggestions = []; }
+        }
       }
     } catch(e2) { reportText = text; }
     const report={id:Date.now().toString(), date:today(), windowStart:lastReport ? lastReport.date : periodDays[0]?.date, report:reportText, notes:ST.aiNotes||"", snapshot:{sessions:sessionCount,protHit,avgNut,weight:bs[0]?.weight,bf:bs[0]?.bf}};
