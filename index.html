@@ -260,7 +260,10 @@ function sbUpsert(table, row) {
     method: "POST",
     headers: Object.assign({}, sbHeaders(), { "Prefer": "resolution=merge-duplicates" }),
     body: JSON.stringify(row)
-  }).then(function(r) { return r.ok; }).catch(function() { return false; });
+  }).then(function(r) {
+    if(!r.ok) r.text().then(function(t){ console.warn("sbUpsert failed on "+table+":", r.status, t); });
+    return r.ok;
+  }).catch(function(e) { console.warn("sbUpsert error on "+table+":", e); return false; });
 }
 function sbDelete(table, id) {
   return fetch(SUPA_URL + "/rest/v1/" + table + "?id=eq." + id, {
@@ -1981,19 +1984,27 @@ function addExerciseToSession(dataStr) {
     // Don't add if already in plan or extras
     var allIds = (PLAN[ST.activeDay]?.exercises||[]).concat(ST.extraExercises).map(function(e){return e.id;});
     if(allIds.includes(ex.id)) return;
-    // Create exercise object compatible with renderExBlock
+    // Create exercise object compatible with renderExBlock — include all required fields
     var newEx = {
-      id: ex.id, name: ex.name, sets: 3, reps: "8-12",
-      tempo: "2-0-1", rest: "60s",
-      muscles: [ex.muscle], steps: [], mistakes: [], proTip: "Focus on form and controlled movement."
+      id: ex.id,
+      name: ex.name,
+      sets: ex.sets || 3,
+      reps: ex.reps || "8-12",
+      tempo: ex.tempo || "2-0-1",
+      rest: ex.rest || "90s",
+      muscles: ex.muscle ? [ex.muscle] : (ex.muscles || ["Unknown"]),
+      steps: ex.steps || ["Set up properly", "Execute the movement with control", "Return to starting position"],
+      mistakes: ex.mistakes || ["Using too much weight", "Losing form under fatigue"],
+      proTip: ex.proTip || "Focus on the mind-muscle connection and controlled movement.",
+      priority: ex.priority || "medium",
+      type: ex.type || "isolation"
     };
     ST.extraExercises.push(newEx);
     ST.activeSets[ex.id] = [{weight:"",reps:"",done:false},{weight:"",reps:"",done:false},{weight:"",reps:"",done:false}];
-    ST.openEx[ex.id] = true; // auto-open the new exercise
-    ST.exSearchQ = ""; // clear search
+    ST.openEx[ex.id] = true;
+    ST.exSearchQ = "";
     saveWorkoutProgress();
     render();
-    // Scroll to the new exercise
     setTimeout(function(){
       var el = document.getElementById("ex-"+ex.id);
       if(el) el.scrollIntoView({behavior:"smooth", block:"nearest"});
