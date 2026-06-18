@@ -597,7 +597,7 @@ const ST = {
   nutFoodQuery: "",
   foodLogDate: null,
   nutMealContext: null, // null = auto-detect from time // explicitly set when logging to a specific date
-  aiLoading: false, aiTab: "latest", aiExpandedReport: null, aiSuggestions: [], aiNotes: "",
+  aiLoading: false, aiTab: "latest", aiExpandedReport: null, aiSuggestions: S.get("ai_suggestions", []), aiNotes: "",
 };
 
 function save() {
@@ -948,34 +948,20 @@ function autoCheckSet(eid, si) {
   if(set.weight && set.reps) {
     set.done = true;
     saveWorkoutProgress();
-    // Update the checkmark visually
+    // Update checkmark visually
     var chk = document.querySelector("[data-cs2='"+eid+"'][data-si='"+si+"']");
     if(chk) { chk.className="schk done"; chk.textContent="✓"; }
     var row = chk && chk.closest(".set-row");
     if(row) { var sn=row.querySelector(".snum"); if(sn) sn.className="snum done"; }
-    // Start rest timer only if enabled in settings
+    // Start rest timer only if enabled
     var exPlan = ST.activeDay && PLAN[ST.activeDay] ? PLAN[ST.activeDay].exercises.find(function(e){return e.id===eid;}) : null;
+    if(!exPlan && ST.extraExercises) exPlan = ST.extraExercises.find(function(e){return e.id===eid;});
     if(exPlan && APP_SETTINGS.restTimerEnabled) startTimer(exPlan.rest);
-    // Update border color
+    // Update border color — plan color when all done, yellow when in progress
     var allSets=ST.activeSets[eid]||[], allDone=allSets.length>0&&allSets.every(function(s){return s.done;});
     var exBlock=document.getElementById("ex-"+eid);
     if(exBlock) exBlock.style.borderColor=allDone?(PLAN[ST.activeDay]?.color||"#4f8ef7")+"55":"rgba(234,179,8,.65)";
-    // Auto-collapse if all done
-    if(allDone) {
-      ST.openEx[eid]=false;
-      saveWorkoutProgress();
-      setTimeout(function(){
-        var block=document.getElementById("ex-"+eid);
-        if(!block) return;
-        var pEx=null,pIdx=0;
-        if(ST.activeDay&&PLAN[ST.activeDay]) PLAN[ST.activeDay].exercises.forEach(function(e,i){if(e.id===eid){pEx=e;pIdx=i;}});
-        if(!pEx) return;
-        var temp=document.createElement("div"); temp.innerHTML=renderExBlock(pEx,pIdx);
-        var newEl=temp.firstElementChild;
-        if(newEl&&block.parentNode){ block.parentNode.replaceChild(newEl,block);
-          var h=newEl.querySelector("[data-toggle-ex]"); if(h) h.addEventListener("click",function(){toggleExBlock(eid,false);}); }
-      }, 500);
-    }
+    // No auto-collapse — let user stay in exercise to add more sets if needed
   }
 }
 
@@ -1012,8 +998,27 @@ function getExHistory(exId, exName, n) {
 }
 
 function getLastExSession(exId, exName) {
-  var h = getExHistory(exId, exName, 1);
-  return h.length > 0 ? h[0] : null;
+  // Find the most recent log containing this exercise regardless of which day it was logged
+  var allLogs = [...ST.workoutLogs].sort(function(a,b){return new Date(b.date)-new Date(a.date);});
+  for(var i=0; i<allLogs.length; i++) {
+    var log = allLogs[i];
+    var ex = (log.exercises||[]).find(function(e){ return e.id===exId || e.name===exName; });
+    if(ex) {
+      var doneSets = (ex.sets||[]).filter(function(s){ return s.weight||s.reps; });
+      if(doneSets.length > 0) {
+        var maxSet = doneSets.reduce(function(a,b){ return (parseFloat(b.weight)||0)>(parseFloat(a.weight)||0)?b:a; }, doneSets[0]);
+        return {
+          date: log.date,
+          dayId: log.dayId,
+          maxWeight: parseFloat(maxSet.weight)||0,
+          maxReps: parseFloat(maxSet.reps)||0,
+          totalSets: doneSets.length,
+          allSets: doneSets
+        };
+      }
+    }
+  }
+  return null;
 }
 
 function getProgressionIncrement(exId, trainingWeeks) {
@@ -1437,6 +1442,7 @@ Only suggest changes with clear data evidence. For exercise swaps use exact exer
     const report={id:Date.now().toString(), date:today(), windowStart:lastReport ? lastReport.date : periodDays[0]?.date, report:reportText, notes:ST.aiNotes||"", snapshot:{sessions:sessionCount,protHit,avgNut,weight:bs[0]?.weight,bf:bs[0]?.bf}};
     ST.aiReports.unshift(report);
     ST.aiSuggestions = suggestions.map(function(s){ return Object.assign({}, s, {dismissed:false}); });
+    S.set("ai_suggestions", ST.aiSuggestions);
     ST.aiNotes = "";
     save(); // Save to localStorage FIRST before anything async
     saveAIReport(report); // Then try Supabase (async, won't block)
@@ -4070,14 +4076,13 @@ function attachAll() {
           var eid2=chk.dataset.cs2,si=+chk.dataset.si;
           if(!ST.activeSets[eid2]) return;
           ST.activeSets[eid2][si].done=!ST.activeSets[eid2][si].done;
-          if(ST.activeSets[eid2][si].done){var exPlan=PLAN[ST.activeDay]?.exercises.find(function(e){return e.id===eid2;});if(exPlan)startTimer(exPlan.rest);}
+          if(ST.activeSets[eid2][si].done){var exPlan=PLAN[ST.activeDay]?.exercises.find(function(e){return e.id===eid2;})||( ST.extraExercises&&ST.extraExercises.find(function(e){return e.id===eid2;}));if(exPlan&&APP_SETTINGS.restTimerEnabled)startTimer(exPlan.rest);}
           chk.className="schk"+(ST.activeSets[eid2][si].done?" done":"");
           chk.textContent=ST.activeSets[eid2][si].done?"✓":"○";
           var row=chk.closest(".set-row");if(row){var sn=row.querySelector(".snum");if(sn)sn.className="snum"+(ST.activeSets[eid2][si].done?" done":"");}
           var allSets=ST.activeSets[eid2]||[],allDone=allSets.length>0&&allSets.every(function(s){return s.done;});
-          var exBlock=document.getElementById("ex-"+eid2);if(exBlock)exBlock.style.borderColor=allDone?(PLAN[ST.activeDay]?.color||"#4f8ef7")+"55":"";
+          var exBlock=document.getElementById("ex-"+eid2);if(exBlock)exBlock.style.borderColor=allDone?(PLAN[ST.activeDay]?.color||"#4f8ef7")+"55":"rgba(234,179,8,.65)";
           saveWorkoutProgress();
-          if(allDone){ST.openEx[eid2]=false;setTimeout(function(){var block=document.getElementById("ex-"+eid2);if(!block)return;var pEx=null,pIdx=0;if(ST.activeDay&&PLAN[ST.activeDay])PLAN[ST.activeDay].exercises.forEach(function(e,i){if(e.id===eid2){pEx=e;pIdx=i;}});if(!pEx)return;var t=document.createElement("div");t.innerHTML=renderExBlock(pEx,pIdx);var ne=t.firstElementChild;if(ne&&block.parentNode){block.parentNode.replaceChild(ne,block);var h=ne.querySelector("[data-toggle-ex]");if(h)h.addEventListener("click",function(){toggleExBlock(eid2,false);});}},500);}
         });
       });
       var addBtn=newBlock.querySelector("[data-add-set]");
@@ -4509,14 +4514,14 @@ function attachAll() {
         alert("✅ Noted: "+s.change);
       }
     }
-    s.dismissed=true; render();
+    s.dismissed=true; S.set("ai_suggestions", ST.aiSuggestions); render();
   }));
 
   // SUGGESTION DISMISS
   $$("[data-dismiss-suggestion]").forEach(el=>el.addEventListener("click",()=>{
     var id=el.dataset.dismissSuggestion;
     var s=ST.aiSuggestions.find(function(x){return x.id===id;});
-    if(s) { s.dismissed=true; render(); }
+    if(s) { s.dismissed=true; S.set("ai_suggestions", ST.aiSuggestions); render(); }
   }));
   $$("[data-exp-report]").forEach(el=>el.addEventListener("click",()=>{
     var pg=document.getElementById("pg"); var sy=pg?pg.scrollTop:0;
