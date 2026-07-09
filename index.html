@@ -360,14 +360,21 @@ function setPhotos(stat, photos) {
 // STORAGE — localStorage as cache, Supabase as source of truth
 // ══════════════════════════════════════════════════
 const S = {
+  _prefix() { return "dft_" + (ACTIVE_PROFILE||"diego") + "_"; },
   get(k, def) {
     try {
-      const v = localStorage.getItem("dft_" + k) || localStorage.getItem(k);
+      // Try profile-namespaced key first
+      var v = localStorage.getItem(this._prefix() + k);
+      // Fall back to legacy unnamespaced key ONLY for the diego profile
+      // (preserves Diego's existing data from before multi-profile support)
+      if(v === null && (ACTIVE_PROFILE === "diego" || !ACTIVE_PROFILE)) {
+        v = localStorage.getItem("dft_" + k) || localStorage.getItem(k);
+      }
       return v ? JSON.parse(v) : def;
     } catch { return def; }
   },
   set(k, v) {
-    try { localStorage.setItem("dft_" + k, JSON.stringify(v)); } catch {}
+    try { localStorage.setItem(this._prefix() + k, JSON.stringify(v)); } catch {}
   }
 };
 
@@ -614,8 +621,8 @@ const ST = {
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {}, showDayPicker: false, extraExercises: [], exSearchQ: "",
   restTimer: null,
   showBodyModal: false, showFoodModal: false, showTargetEditor: false, showSettings: false, editingStat: null,
-  onboardingStep: parseInt(localStorage.getItem("ob_step")||"1"),
-  onboardingAnswers: JSON.parse(localStorage.getItem("ob_answers")||"{}"),
+  onboardingStep: parseInt(S.get("ob_step","1")||"1"),
+  onboardingAnswers: S.get("ob_answers", {}),
   onboardingGenerating: false,
   onboardingError: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]}, breakdown: null,
   expandedLog: null,
@@ -2191,9 +2198,9 @@ function renderExBlock(ex, idx) {
       <button class="btn bg" style="width:100%;font-size:12px;padding:8px" data-toggle-guide="${ex.id}">${guideOpen?"Hide Form Guide":"📋 Form Guide"}</button>
     </div>
     ${guideOpen?`<div class="fguide"><div class="fg-body">
-      <div class="fg-sec"><div class="fg-ttl">Step-by-Step</div>${(ex.steps||[]).map((s,i)=>`<div class="fg-step"><div class="fg-snum">${i+1}</div><div>${s}</div></div>`).join("")}</div>
-      <div class="fg-sec"><div class="fg-ttl">Common Mistakes</div>${(ex.mistakes||[]).map(m=>`<div class="fg-err"><div class="fg-x">✗</div><div>${m}</div></div>`).join("")}</div>
-      <div class="fg-tip">⭐ ${ex.proTip}</div>
+      ${(ex.steps&&ex.steps.length>0)?`<div class="fg-sec"><div class="fg-ttl">Step-by-Step</div>${ex.steps.map((s,i)=>`<div class="fg-step"><div class="fg-snum">${i+1}</div><div>${s}</div></div>`).join("")}</div>`:""}
+      ${(ex.mistakes&&ex.mistakes.length>0)?`<div class="fg-sec"><div class="fg-ttl">Common Mistakes</div>${ex.mistakes.map(m=>`<div class="fg-err"><div class="fg-x">✗</div><div>${m}</div></div>`).join("")}</div>`:""}
+      <div class="fg-tip">⭐ ${ex.proTip || ex.tip || "Focus on controlled form and full range of motion."}</div>
     </div></div>`:""}
 
     ${last && last.allSets && last.allSets.length > 0 ? `
@@ -3037,8 +3044,8 @@ function saveSettings() {
 const OB_TOTAL_STEPS = 5;
 
 function obSave() {
-  localStorage.setItem("ob_step", String(ST.onboardingStep));
-  localStorage.setItem("ob_answers", JSON.stringify(ST.onboardingAnswers));
+  S.set("ob_step", ST.onboardingStep);
+  S.set("ob_answers", ST.onboardingAnswers);
 }
 
 function renderOnboarding() {
@@ -3278,8 +3285,10 @@ Rules:
     // Mark onboarding complete
     APP_SETTINGS.onboardingComplete = true;
     saveSettings();
-    localStorage.removeItem("ob_step");
+    localStorage.removeItem("ob_step"); // no-op safety for any legacy unnamespaced key
     localStorage.removeItem("ob_answers");
+    S.set("ob_step", 1);
+    S.set("ob_answers", {});
     ST.onboardingGenerating = false;
     save();
     render();
