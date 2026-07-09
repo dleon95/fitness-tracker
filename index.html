@@ -93,7 +93,7 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--font-b);heigh
 .schk:active{transform:scale(.92)}
 .add-set{width:100%;padding:8px;background:none;border:1px dashed var(--border);border-radius:var(--rs);color:var(--muted);font-family:var(--font-b);font-size:12px;font-weight:600;cursor:pointer;margin-top:2px}
 /* WORKOUT ACTION BAR - fixed at bottom above nav */
-.wact{padding:14px 16px;display:flex;gap:10px;position:fixed;bottom:calc(68px + max(16px,env(safe-area-inset-bottom)));left:50%;transform:translateX(-50%);width:100%;max-width:480px;background:rgba(10,10,15,.97);backdrop-filter:blur(20px);border-top:1px solid var(--border);z-index:20}
+/* .wact removed — Save/Cancel now live in the session header */
 /* REST TIMER */
 .rtimer{position:fixed;bottom:calc(120px + max(6px,env(safe-area-inset-bottom)));left:50%;transform:translateX(-50%);width:calc(100% - 32px);max-width:448px;background:var(--bg3);border:1px solid var(--accent);border-radius:var(--r);padding:12px 16px;display:flex;align-items:center;gap:12px;z-index:50;box-shadow:0 8px 32px rgba(79,142,247,.25);animation:sup .25s ease}
 @keyframes sup{from{transform:translateX(-50%) translateY(20px);opacity:0}}
@@ -244,8 +244,32 @@ html,body{background:var(--bg);color:var(--text);font-family:var(--font-b);heigh
 // ══════════════════════════════════════════════════
 // SUPABASE CONFIG
 // ══════════════════════════════════════════════════
-var SUPA_URL = "https://cpjwxsanjxafozzdewrd.supabase.co";
-var SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwand4c2FuanhhZm96emRld3JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNDMxMTQsImV4cCI6MjA5MzkxOTExNH0.OXgHDAtv40Oy8CaREnGH6t7gX4dhR9Geca8dAWNkrQk";
+// Multi-user profiles — each maps to a separate, fully isolated Supabase project
+const PROFILES = {
+  diego: {
+    label: "Diego",
+    emoji: "💪",
+    url: "https://cpjwxsanjxafozzdewrd.supabase.co",
+    key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwand4c2FuanhhZm96emRld3JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNDMxMTQsImV4cCI6MjA5MzkxOTExNH0.OXgHDAtv40Oy8CaREnGH6t7gX4dhR9Geca8dAWNkrQk"
+  },
+  ariana: {
+    label: "Ariana",
+    emoji: "🌸",
+    url: "https://fecwnmenfswwfxcgvrai.supabase.co",
+    key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZlY3dubWVuZnN3d2Z4Y2d2cmFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1NjE1ODksImV4cCI6MjA5OTEzNzU4OX0.-kvQ-P1aY4Gu386T0eemJneJAtDinJ2X17iiDZqCyug"
+  }
+};
+
+// Resolve which profile this device belongs to (persisted forever in localStorage)
+var ACTIVE_PROFILE = localStorage.getItem("app_profile");
+var SUPA_URL = ACTIVE_PROFILE && PROFILES[ACTIVE_PROFILE] ? PROFILES[ACTIVE_PROFILE].url : "";
+var SUPA_KEY = ACTIVE_PROFILE && PROFILES[ACTIVE_PROFILE] ? PROFILES[ACTIVE_PROFILE].key : "";
+
+function selectProfile(name) {
+  if(!PROFILES[name]) return;
+  localStorage.setItem("app_profile", name);
+  location.reload(); // simplest, safest way to fully re-init with new credentials
+}
 
 function sbHeaders() {
   return { "apikey": SUPA_KEY, "Authorization": "Bearer " + SUPA_KEY, "Content-Type": "application/json" };
@@ -1689,7 +1713,7 @@ function renderDashboard() {
   return `
   <div class="ph" style="display:flex;align-items:flex-start;justify-content:space-between">
     <div>
-      <div class="pt">DIEGO'S TRACKER</div>
+      <div class="pt">${(PROFILES[ACTIVE_PROFILE]?.label||"").toUpperCase()}'S TRACKER</div>
       <div class="ps">${(()=>{
         const firstLog = ST.workoutLogs.length > 0 ? ST.workoutLogs[ST.workoutLogs.length-1].date : null;
         const weekLabel = firstLog ? "Training week " + Math.ceil((daysAgo(firstLog)+1)/7) : new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"});
@@ -1699,7 +1723,7 @@ function renderDashboard() {
     <button data-action="open-settings" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:8px 10px;font-size:16px;cursor:pointer;color:var(--muted);flex-shrink:0;margin-top:4px">⚙️</button>
   </div>
 
-  <div class="wbanner"><div class="wname">LET'S GO,<br>DIEGO.</div><div class="wsub">${latest.weight?`${latest.weight} lbs · ${latest.bf}% BF · ${getLean(latest.weight,latest.bf)||"—"} lbs lean mass`:"Tap Body tab to log your first entry"}</div></div>
+  <div class="wbanner"><div class="wname">LET'S GO,<br>${(PROFILES[ACTIVE_PROFILE]?.label||"").toUpperCase()}.</div><div class="wsub">${latest.weight?`${latest.weight} lbs · ${latest.bf}% BF · ${getLean(latest.weight,latest.bf)||"—"} lbs lean mass`:"Tap Body tab to log your first entry"}</div></div>
 
   <div class="sgrid">
     <div class="sc"><div class="sl">Weight</div><div class="sv" style="color:#4f8ef7">${latest.weight||"—"}</div><div class="su">lbs</div>${wDelta!==null?`<div class="sd ${parseFloat(wDelta)<=0?"dg":"db"}">${parseFloat(wDelta)>0?"+":""}${wDelta} lbs</div>`:""}</div>
@@ -1786,13 +1810,13 @@ function renderDashboard() {
   </div>`;
 
   return `
-  <div class="ph"><div class="pt">DIEGO'S TRACKER</div><div class="ps">${(()=>{
+  <div class="ph"><div class="pt">${(PROFILES[ACTIVE_PROFILE]?.label||"").toUpperCase()}'S TRACKER</div><div class="ps">${(()=>{
     const firstLog = ST.workoutLogs.length > 0 ? ST.workoutLogs[ST.workoutLogs.length-1].date : null;
     const weekLabel = firstLog ? "Training week " + Math.ceil((daysAgo(firstLog)+1)/7) : new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"});
     return weekLabel;
   })()} · ${wl.length}/6 sessions · <span style="color:${ST.online?'var(--green)':'var(--orange)'}">${ST.online?'● Synced':'● Offline — reopen to sync'}</span></div></div>
 
-  <div class="wbanner"><div class="wname">LET'S GO,<br>DIEGO.</div><div class="wsub">${latest.weight?`${latest.weight} lbs · ${latest.bf}% BF · ${getLean(latest.weight,latest.bf)||"—"} lbs lean mass`:"Tap Body tab to log your first entry"}</div></div>
+  <div class="wbanner"><div class="wname">LET'S GO,<br>${(PROFILES[ACTIVE_PROFILE]?.label||"").toUpperCase()}.</div><div class="wsub">${latest.weight?`${latest.weight} lbs · ${latest.bf}% BF · ${getLean(latest.weight,latest.bf)||"—"} lbs lean mass`:"Tap Body tab to log your first entry"}</div></div>
 
   <div class="sgrid">
     <div class="sc"><div class="sl">Weight</div><div class="sv" style="color:#4f8ef7">${latest.weight||"—"}</div><div class="su">lbs</div>${wDelta!==null?`<div class="sd ${parseFloat(wDelta)<=0?"dg":"db"}">${parseFloat(wDelta)>0?"+":""}${wDelta} lbs</div>`:""}</div>
@@ -2078,12 +2102,16 @@ function renderWorkoutSession() {
       <div style="font-family:var(--font-d);font-size:24px;letter-spacing:1px;color:${plan.color}">${plan.emoji} ${plan.title}</div></div>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-top:4px">${plan.duration} · ${plan.muscles}</div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn bg" style="flex:1;font-size:13px" data-action="clear-day">Cancel</button>
+      <button class="btn bp" style="flex:2;font-size:13px" data-action="finish-workout">💾 Save Workout</button>
+    </div>
   </div>
   <div style="height:12px"></div>
   ${allExercises.map((ex,i)=>renderExBlock(ex,i)).join("")}
 
   <!-- Add Exercise Search -->
-  <div style="margin:8px 16px 160px;background:var(--bg2);border:1px dashed var(--border);border-radius:var(--r);padding:12px">
+  <div style="margin:8px 16px 40px;background:var(--bg2);border:1px dashed var(--border);border-radius:var(--r);padding:12px">
     <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">+ Add Exercise</div>
     <input id="ex-search-input" class="finput" placeholder="Search by name or muscle (e.g. calf, bicep)…" value="${exSearchQ}" autocomplete="off" style="margin-bottom:0">
     <div id="ex-search-results" style="margin-top:4px">
@@ -2103,11 +2131,6 @@ function renderWorkoutSession() {
         <button id="ask-claude-ex-btn" class="btn bpur bfull" style="font-size:12px;padding:8px">🤖 Add "${exSearchQ}" via Claude</button>
       </div>` : ""}
     </div>
-  </div>
-
-  <div class="wact">
-    <button class="btn bg" style="flex:1" data-action="clear-day">Cancel</button>
-    <button class="btn bp" style="flex:2" data-action="finish-workout">💾 Save Workout</button>
   </div>`;
 }
 
@@ -3024,6 +3047,19 @@ function renderSettings() {
     </div>
 
     <div style="height:20px"></div>
+    <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">👤 Profile</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="font-size:22px">${PROFILES[ACTIVE_PROFILE]?.emoji||"👤"}</div>
+        <div>
+          <div style="font-weight:600;font-size:14px">${PROFILES[ACTIVE_PROFILE]?.label||"Unknown"}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">Signed in on this device</div>
+        </div>
+      </div>
+      <button id="switch-profile-btn" style="background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);padding:8px 12px;font-size:12px;font-weight:700;color:var(--muted);cursor:pointer;font-family:var(--font-b)">Switch</button>
+    </div>
+
+    <div style="height:20px"></div>
     <div style="font-size:11px;color:var(--muted);text-align:center">More settings coming soon</div>
   </div></div>`;
 }
@@ -3850,6 +3886,87 @@ function attachAll() {
   $("[data-action='resume-day']")?.addEventListener("click",()=>{ST.showDayPicker=false;render();});
 
   // EXERCISE TOGGLE — surgical in-place update, never calls render()
+  function refreshExBlock(id) {
+    // Re-render this exercise block using CURRENT ST.openEx state — never toggles it
+    var ex = null;
+    var exIdx = 0;
+    if(ST.activeDay && PLAN[ST.activeDay]) {
+      PLAN[ST.activeDay].exercises.forEach(function(e, i){ if(e.id===id){ex=e; exIdx=i;} });
+    }
+    if(!ex && ST.extraExercises) {
+      var planLen2 = ST.activeDay&&PLAN[ST.activeDay] ? PLAN[ST.activeDay].exercises.length : 0;
+      ST.extraExercises.forEach(function(e,i){ if(e.id===id){ex=e; exIdx=planLen2+i;} });
+    }
+    if(!ex) { render(); return; }
+    var exEl = document.getElementById("ex-"+id);
+    if(!exEl) { render(); return; }
+    var newHTML = renderExBlock(ex, exIdx);
+    var temp = document.createElement("div");
+    temp.innerHTML = newHTML;
+    var newEl = temp.firstElementChild;
+    exEl.parentNode.replaceChild(newEl, exEl);
+    var newBlock = document.getElementById("ex-"+id);
+    if(!newBlock) return;
+    var hdr = newBlock.querySelector("[data-toggle-ex]");
+    if(hdr) hdr.addEventListener("click", function(){ toggleExBlock(id, false); });
+    var guide = newBlock.querySelector("[data-toggle-guide]");
+    if(guide) guide.addEventListener("click", function(e){ e.stopPropagation(); toggleExBlock(id, true); });
+    newBlock.querySelectorAll("[data-del-set]").forEach(function(btn){
+      btn.addEventListener("click",function(e){
+        e.stopPropagation();
+        var eid2=btn.dataset.delSet, si2=+btn.dataset.delSi;
+        if(ST.activeSets[eid2] && ST.activeSets[eid2].length>1) {
+          ST.activeSets[eid2].splice(si2,1);
+          ST.openEx[eid2]=true;
+          saveWorkoutProgress();
+          refreshExBlock(eid2);
+        }
+      });
+    });
+    newBlock.querySelectorAll("[data-sw]").forEach(function(el){
+      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sw]) { ST.activeSets[el.dataset.sw][+el.dataset.si].weight=el.value; saveWorkoutProgress(); autoCheckSet(el.dataset.sw,+el.dataset.si); } });
+    });
+    newBlock.querySelectorAll("[data-sr]").forEach(function(el){
+      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sr]) { ST.activeSets[el.dataset.sr][+el.dataset.si].reps=el.value; saveWorkoutProgress(); autoCheckSet(el.dataset.sr,+el.dataset.si); } });
+    });
+    newBlock.querySelectorAll("[data-cs2]").forEach(function(el){
+      el.addEventListener("click", function(){
+        var eid=el.dataset.cs2, si=+el.dataset.si;
+        if(!ST.activeSets[eid]) return;
+        ST.activeSets[eid][si].done=!ST.activeSets[eid][si].done;
+        if(ST.activeSets[eid][si].done) {
+          var exPlan = (ST.activeDay && PLAN[ST.activeDay] ? PLAN[ST.activeDay].exercises.find(function(e){return e.id===eid;}) : null) || (ST.extraExercises && ST.extraExercises.find(function(e){return e.id===eid;}));
+          if(exPlan && APP_SETTINGS.restTimerEnabled) startTimer(exPlan.rest);
+        }
+        el.className = "schk" + (ST.activeSets[eid][si].done?" done":"");
+        el.textContent = ST.activeSets[eid][si].done?"✓":"○";
+        var row = el.closest(".set-row");
+        if(row) {
+          var snum = row.querySelector(".snum");
+          if(snum) { snum.className = "snum" + (ST.activeSets[eid][si].done?" done":""); }
+        }
+        var allSets = ST.activeSets[eid]||[];
+        var doneCount = allSets.filter(function(s){return s.done;}).length;
+        var allDone = doneCount===allSets.length && allSets.length>0;
+        var exBlock = document.getElementById("ex-"+eid);
+        if(exBlock) exBlock.style.borderColor = allDone ? (PLAN[ST.activeDay]?.color||"#4f8ef7")+"55" : "rgba(234,179,8,.65)";
+        saveWorkoutProgress();
+      });
+    });
+    var addBtn = newBlock.querySelector("[data-add-set]");
+    if(addBtn) addBtn.addEventListener("click", function(){
+      var eid=addBtn.dataset.addSet;
+      if(!ST.activeSets[eid]) ST.activeSets[eid]=[];
+      ST.activeSets[eid].push({weight:"",reps:"",done:false});
+      ST.openEx[eid]=true;
+      saveWorkoutProgress();
+      refreshExBlock(eid);
+    });
+    if(ST.openEx[id]) {
+      setTimeout(function(){ newBlock.scrollIntoView({behavior:"smooth",block:"nearest"}); }, 50);
+    }
+  }
+
   function toggleExBlock(id, toggleGuide) {
     if(toggleGuide) {
       ST.openGuide[id] = !ST.openGuide[id];
@@ -3864,96 +3981,7 @@ function attachAll() {
       ST.openEx[id] = opening;
       if(!ST.openEx[id]) ST.openGuide[id] = false;
     }
-    // Find the exercise in the plan or extras
-    var ex = null;
-    var exIdx = 0;
-    if(ST.activeDay && PLAN[ST.activeDay]) {
-      PLAN[ST.activeDay].exercises.forEach(function(e, i){ if(e.id===id){ex=e; exIdx=i;} });
-    }
-    if(!ex && ST.extraExercises) {
-      var planLen2 = ST.activeDay&&PLAN[ST.activeDay] ? PLAN[ST.activeDay].exercises.length : 0;
-      ST.extraExercises.forEach(function(e,i){ if(e.id===id){ex=e; exIdx=planLen2+i;} });
-    }
-    if(!ex) { render(); return; }
-    // Replace just this exercise block's HTML
-    var exEl = document.getElementById("ex-"+id);
-    if(!exEl) { render(); return; }
-    var newHTML = renderExBlock(ex, exIdx);
-    var temp = document.createElement("div");
-    temp.innerHTML = newHTML;
-    var newEl = temp.firstElementChild;
-    exEl.parentNode.replaceChild(newEl, exEl);
-    // Re-attach listeners for the new block only
-    var newBlock = document.getElementById("ex-"+id);
-    if(!newBlock) return;
-    // Toggle ex header
-    var hdr = newBlock.querySelector("[data-toggle-ex]");
-    if(hdr) hdr.addEventListener("click", function(){ toggleExBlock(id, false); });
-    // Toggle guide
-    var guide = newBlock.querySelector("[data-toggle-guide]");
-    if(guide) guide.addEventListener("click", function(e){ e.stopPropagation(); toggleExBlock(id, true); });
-    newBlock.querySelectorAll("[data-del-set]").forEach(function(btn){
-      btn.addEventListener("click",function(e){ e.stopPropagation(); var eid2=btn.dataset.delSet,si2=+btn.dataset.delSi; if(ST.activeSets[eid2]&&ST.activeSets[eid2].length>1){ST.activeSets[eid2].splice(si2,1);ST.openEx[eid2]=true;saveWorkoutProgress();toggleExBlock(eid2,false);}});
-    });
-    // Weight/rep inputs
-    newBlock.querySelectorAll("[data-sw]").forEach(function(el){
-      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sw]) { ST.activeSets[el.dataset.sw][+el.dataset.si].weight=el.value; saveWorkoutProgress(); autoCheckSet(el.dataset.sw,+el.dataset.si); } });
-    });
-    newBlock.querySelectorAll("[data-sr]").forEach(function(el){
-      el.addEventListener("input", function(){ if(ST.activeSets[el.dataset.sr]) { ST.activeSets[el.dataset.sr][+el.dataset.si].reps=el.value; saveWorkoutProgress(); autoCheckSet(el.dataset.sr,+el.dataset.si); } });
-    });
-    // Checkmark
-    newBlock.querySelectorAll("[data-cs2]").forEach(function(el){
-      el.addEventListener("click", function(){
-        var eid=el.dataset.cs2, si=+el.dataset.si;
-        if(!ST.activeSets[eid]) return;
-        ST.activeSets[eid][si].done=!ST.activeSets[eid][si].done;
-        if(ST.activeSets[eid][si].done) {
-          var exPlan = ST.activeDay && PLAN[ST.activeDay] ? PLAN[ST.activeDay].exercises.find(function(e){return e.id===eid;}) : null;
-          if(exPlan) startTimer(exPlan.rest);
-        }
-        // Update just this row's visual state without re-rendering the whole block
-        el.className = "schk" + (ST.activeSets[eid][si].done?" done":"");
-        el.textContent = ST.activeSets[eid][si].done?"✓":"○";
-        var row = el.closest(".set-row");
-        if(row) {
-          var snum = row.querySelector(".snum");
-          if(snum) { snum.className = "snum" + (ST.activeSets[eid][si].done?" done":""); }
-        }
-        // Update the header done count + exercise border color
-        var allSets = ST.activeSets[eid]||[];
-        var doneCount = allSets.filter(function(s){return s.done;}).length;
-        var allDone = doneCount===allSets.length && allSets.length>0;
-        var exBlock = document.getElementById("ex-"+eid);
-        if(exBlock) {
-          var numEl = exBlock.querySelector(".exnum");
-          if(numEl) { numEl.className="exnum"+(allDone?" done":""); numEl.textContent=allDone?"✓":String(si+1).replace(/\d+/,function(){
-            // find original index
-            var planEx = PLAN[ST.activeDay]?.exercises;
-            var idx = planEx ? planEx.findIndex(function(e){return e.id===eid;}) : 0;
-            return idx+1;
-          }); }
-          var specEl = exBlock.querySelector(".exspec");
-          if(specEl && doneCount>0) {
-            // Update the done count in spec line
-          }
-          if(allDone) exBlock.style.borderColor = (PLAN[ST.activeDay]?.color||"#4f8ef7")+"55";
-          else exBlock.style.borderColor = "";
-        }
-      });
-    });
-    // Add set button
-    var addBtn = newBlock.querySelector("[data-add-set]");
-    if(addBtn) addBtn.addEventListener("click", function(){
-      var eid=addBtn.dataset.addSet;
-      if(!ST.activeSets[eid]) ST.activeSets[eid]=[];
-      ST.activeSets[eid].push({weight:"",reps:"",done:false});
-      toggleExBlock(eid, false);
-    });
-    // Scroll into view if opening
-    if(ST.openEx[id]) {
-      setTimeout(function(){ newBlock.scrollIntoView({behavior:"smooth",block:"nearest"}); }, 50);
-    }
+    refreshExBlock(id);
   }
 
   $$("[data-toggle-ex]").forEach(el=>el.addEventListener("click",()=>{
@@ -4035,61 +4063,23 @@ function attachAll() {
       ST.activeSets[eid].splice(si,1);
       ST.openEx[eid]=true;
       saveWorkoutProgress();
-      toggleExBlock(eid,false);
+      refreshExBlock(eid);
     }
   }));
 
-  // ADD SET — surgical: add set and re-render block keeping it open
+  // ADD SET — surgical: add set and refresh block keeping it open (never toggles closed)
   $$("[data-add-set]").forEach(el=>el.addEventListener("click",e=>{
     e.stopPropagation();
     const eid=el.dataset.addSet;
     if(!ST.activeSets[eid]) ST.activeSets[eid]=[];
     ST.activeSets[eid].push({weight:"",reps:"",done:false});
-    ST.openEx[eid]=true; // ensure stays open
+    ST.openEx[eid]=true;
     saveWorkoutProgress();
-    // Re-render just this block
-    const exEl=document.getElementById("ex-"+eid);
-    if(!exEl) return;
-    var planEx=null, planIdx=0;
-    if(ST.activeDay&&PLAN[ST.activeDay]) PLAN[ST.activeDay].exercises.forEach(function(e,i){if(e.id===eid){planEx=e;planIdx=i;}});
-    // Also search extra exercises if not found in plan
-    if(!planEx && ST.extraExercises) {
-      var planLen = ST.activeDay&&PLAN[ST.activeDay] ? PLAN[ST.activeDay].exercises.length : 0;
-      ST.extraExercises.forEach(function(e,i){if(e.id===eid){planEx=e;planIdx=planLen+i;}});
-    }
-    if(!planEx) return;
-    var temp=document.createElement("div");
-    temp.innerHTML=renderExBlock(planEx,planIdx);
-    var newEl=temp.firstElementChild;
-    exEl.parentNode.replaceChild(newEl,exEl);
-    // Re-attach listeners for the new block
-    var newBlock=document.getElementById("ex-"+eid);
-    if(newBlock) {
-      var hdr=newBlock.querySelector("[data-toggle-ex]");
-      if(hdr) hdr.addEventListener("click",function(){toggleExBlock(eid,false);});
-      var guide=newBlock.querySelector("[data-toggle-guide]");
-      if(guide) guide.addEventListener("click",function(e2){e2.stopPropagation();toggleExBlock(eid,true);});
-      newBlock.querySelectorAll("[data-sw]").forEach(function(inp){inp.addEventListener("input",function(){if(ST.activeSets[inp.dataset.sw])ST.activeSets[inp.dataset.sw][+inp.dataset.si].weight=inp.value;saveWorkoutProgress();});});
-      newBlock.querySelectorAll("[data-sr]").forEach(function(inp){inp.addEventListener("input",function(){if(ST.activeSets[inp.dataset.sr])ST.activeSets[inp.dataset.sr][+inp.dataset.si].reps=inp.value;saveWorkoutProgress();});});
-      newBlock.querySelectorAll("[data-cs2]").forEach(function(chk){
-        chk.addEventListener("click",function(){
-          var eid2=chk.dataset.cs2,si=+chk.dataset.si;
-          if(!ST.activeSets[eid2]) return;
-          ST.activeSets[eid2][si].done=!ST.activeSets[eid2][si].done;
-          if(ST.activeSets[eid2][si].done){var exPlan=PLAN[ST.activeDay]?.exercises.find(function(e){return e.id===eid2;})||( ST.extraExercises&&ST.extraExercises.find(function(e){return e.id===eid2;}));if(exPlan&&APP_SETTINGS.restTimerEnabled)startTimer(exPlan.rest);}
-          chk.className="schk"+(ST.activeSets[eid2][si].done?" done":"");
-          chk.textContent=ST.activeSets[eid2][si].done?"✓":"○";
-          var row=chk.closest(".set-row");if(row){var sn=row.querySelector(".snum");if(sn)sn.className="snum"+(ST.activeSets[eid2][si].done?" done":"");}
-          var allSets=ST.activeSets[eid2]||[],allDone=allSets.length>0&&allSets.every(function(s){return s.done;});
-          var exBlock=document.getElementById("ex-"+eid2);if(exBlock)exBlock.style.borderColor=allDone?(PLAN[ST.activeDay]?.color||"#4f8ef7")+"55":"rgba(234,179,8,.65)";
-          saveWorkoutProgress();
-        });
-      });
-      var addBtn=newBlock.querySelector("[data-add-set]");
-      if(addBtn) addBtn.addEventListener("click",function(e2){e2.stopPropagation();var eid2=addBtn.dataset.addSet;if(!ST.activeSets[eid2])ST.activeSets[eid2]=[];ST.activeSets[eid2].push({weight:"",reps:"",done:false});ST.openEx[eid2]=true;saveWorkoutProgress();var bl=document.getElementById("ex-"+eid2);if(bl){var pe=null,pi=0;if(ST.activeDay&&PLAN[ST.activeDay])PLAN[ST.activeDay].exercises.forEach(function(e,i){if(e.id===eid2){pe=e;pi=i;}});if(pe){var tmp=document.createElement("div");tmp.innerHTML=renderExBlock(pe,pi);var ne=tmp.firstElementChild;bl.parentNode.replaceChild(ne,bl);var h=ne.querySelector("[data-toggle-ex]");if(h)h.addEventListener("click",function(){toggleExBlock(eid2,false);});}}});
-      // Focus last weight input
-      setTimeout(function(){var inputs=newBlock.querySelectorAll(".sinput");if(inputs.length>=2){inputs[inputs.length-2].focus();}},50);
-    }
+    refreshExBlock(eid);
+    setTimeout(function(){
+      var newBlock=document.getElementById("ex-"+eid);
+      if(newBlock) { var inputs=newBlock.querySelectorAll(".sinput"); if(inputs.length>=2) inputs[inputs.length-2].focus(); }
+    }, 60);
   }));
 
   // BACK TO PICKER — preserves workout data, just hides session view
@@ -4098,7 +4088,11 @@ function attachAll() {
   });
 
   // WORKOUT ACTIONS
-  $$("[data-action='clear-day']").forEach(el=>el.addEventListener("click",()=>{ST.activeDay=null;ST.activeSets={};ST.openEx={};ST.openGuide={};clearWorkoutProgress();render();}));
+  $$("[data-action='clear-day']").forEach(el=>el.addEventListener("click",()=>{
+    var hasProgress = Object.values(ST.activeSets).some(function(s){return s.some(function(set){return set.weight||set.reps;});});
+    if(hasProgress && !confirm("Cancel this workout? Any logged sets will be lost.")) return;
+    ST.activeDay=null;ST.activeSets={};ST.openEx={};ST.openGuide={};ST.extraExercises=[];ST.exSearchQ="";clearWorkoutProgress();render();
+  }));
   $("[data-action='finish-workout']")?.addEventListener("click",()=>{
     const plan=PLAN[ST.activeDay]; if(!plan) return;
     const allEx = plan.exercises.concat(ST.extraExercises||[]);
@@ -4270,6 +4264,13 @@ function attachAll() {
   $("[data-action='close-settings']")?.addEventListener("click",()=>{ST.showSettings=false;render();});
   document.getElementById("close-settings-btn")?.addEventListener("click",function(e){
     e.stopPropagation(); ST.showSettings=false; render();
+  });
+  document.getElementById("switch-profile-btn")?.addEventListener("click",function(e){
+    e.stopPropagation();
+    if(confirm("Switch to a different profile? This only changes which account this device is signed into — your data stays safe under your current profile.")) {
+      localStorage.removeItem("app_profile");
+      location.reload();
+    }
   });
   // Toggle switches — surgical update, no page scroll
   document.getElementById("toggle-restTimerEnabled")?.addEventListener("click",function(e){
@@ -5013,7 +5014,7 @@ function attachFoodModalInner() {
 function showLoader() {
   var appEl = document.getElementById("app");
   if(!appEl) return;
-  appEl.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:16px;background:#0a0a0f"><div style="font-family:Arial Black,Arial,sans-serif;font-size:42px;letter-spacing:2px;color:#4f8ef7">DIEGO\'S</div><div style="font-family:Arial Black,Arial,sans-serif;font-size:22px;letter-spacing:1px;color:#6b6b88">FITNESS TRACKER</div><div style="width:40px;height:40px;border:3px solid #2a2a3a;border-top-color:#4f8ef7;border-radius:50%;animation:spin 1s linear infinite;margin-top:20px"></div><div style="font-size:13px;color:#6b6b88;margin-top:4px">Loading your data\u2026</div></div>';
+  appEl.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:16px;background:#0a0a0f"><div style="font-family:Arial Black,Arial,sans-serif;font-size:42px;letter-spacing:2px;color:#4f8ef7">'+((PROFILES[ACTIVE_PROFILE]&&PROFILES[ACTIVE_PROFILE].label)||"")+'\'S</div><div style="font-family:Arial Black,Arial,sans-serif;font-size:22px;letter-spacing:1px;color:#6b6b88">FITNESS TRACKER</div><div style="width:40px;height:40px;border:3px solid #2a2a3a;border-top-color:#4f8ef7;border-radius:50%;animation:spin 1s linear infinite;margin-top:20px"></div><div style="font-size:13px;color:#6b6b88;margin-top:4px">Loading your data\u2026</div></div>';
 }
 
 function loadFromCache() {
@@ -5182,10 +5183,36 @@ document.addEventListener("click", function(e) {
 window.addEventListener("error", function(e) { console.error("App error:", e); });
 window.addEventListener("unhandledrejection", function(e) { console.error("Promise error:", e); });
 
+function showProfilePicker() {
+  var appEl = document.getElementById("app");
+  if(!appEl) return;
+  appEl.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:24px;background:#0a0a0f;padding:20px">
+      <div style="text-align:center">
+        <div style="font-family:Arial Black,Arial,sans-serif;font-size:28px;letter-spacing:1px;color:#4f8ef7">FITNESS TRACKER</div>
+        <div style="font-size:14px;color:#6b6b88;margin-top:8px">Who's using this app?</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;width:100%;max-width:320px">
+        ${Object.entries(PROFILES).map(function([key, p]){
+          return `<button data-select-profile="${key}" style="display:flex;align-items:center;gap:14px;padding:16px 20px;background:#1a1a24;border:1px solid #2a2a3a;border-radius:14px;cursor:pointer;font-family:inherit;text-align:left">
+            <div style="font-size:28px">${p.emoji}</div>
+            <div style="font-size:17px;font-weight:700;color:#fff">${p.label}</div>
+          </button>`;
+        }).join("")}
+      </div>
+      <div style="font-size:11px;color:#4a4a5a;text-align:center;max-width:280px">This choice is saved on this device only — you won't be asked again here.</div>
+    </div>`;
+  document.querySelectorAll("[data-select-profile]").forEach(function(btn){
+    btn.addEventListener("click", function(){ selectProfile(btn.dataset.selectProfile); });
+  });
+}
+
 if(document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", boot);
+  document.addEventListener("DOMContentLoaded", function(){
+    if(!ACTIVE_PROFILE || !PROFILES[ACTIVE_PROFILE]) { showProfilePicker(); } else { boot(); }
+  });
 } else {
-  boot();
+  if(!ACTIVE_PROFILE || !PROFILES[ACTIVE_PROFILE]) { showProfilePicker(); } else { boot(); }
 }
 </script>
 </body>
