@@ -374,7 +374,7 @@ const S = {
 // ══════════════════════════════════════════════════
 // WORKOUT PLAN DATA
 // ══════════════════════════════════════════════════
-const PLAN = {
+let PLAN = {
   MON:{id:"MON",label:"Monday",title:"Legs — Quad",color:"#4f8ef7",emoji:"🦵",duration:"55 min",muscles:"Quads · Glutes · Hamstrings · Calves · Core",exercises:[
     {id:"back_squat",name:"Back Squat",sets:4,reps:"6–8",tempo:"3-1-X",rest:"3 min",muscles:"Quads, glutes, core",tip:"Bar mid-trap, chest up, knees track over toes.",ytQ:"back squat form tutorial",steps:["Bar on mid-trap, grip just outside shoulder width","Deep breath, brace core hard","Feet shoulder-width, toes 30° out","Push knees out and sit DOWN (not forward)","Hit depth, drive through mid-foot"],mistakes:["Bar too high on neck","Knees caving in","Heels rising — elevate if flat-footed"],proTip:"Flat feet: place 5-lb plates under heels. Instantly improves depth and knee tracking."},
     {id:"rdl_mon",name:"Romanian Deadlift",sets:3,reps:"8–10",tempo:"3-1-1",rest:"2 min",muscles:"Hamstrings, glutes",tip:"Hip hinge — NOT a squat. Feel the stretch.",ytQ:"romanian deadlift form",steps:["Stand hip-width, soft knee bend","Push hips BACK — bar slides down thighs","Feel hamstring stretch, stop before lower back rounds","Drive hips forward, squeeze glutes at top"],mistakes:["Bending knees too much","Bar drifting away from legs","Rounding lower back"],proTip:"Think 'close the car door with your butt' to cue the hip hinge."},
@@ -436,7 +436,7 @@ const PLAN = {
     {id:"lat_fin",name:"Lateral Raise (finisher)",sets:3,reps:"15–20",tempo:"2-2-1",rest:"45 sec",muscles:"Medial deltoid",tip:"Light weight, strict form. Shoulders should burn.",ytQ:"lateral raise high rep technique",steps:["Very light DBs, strict form","Raise to shoulder height, elbows lead","Squeeze at top, lower slowly"],mistakes:["Going too heavy","Swinging for extra reps"],proTip:"Drop set: 15 lbs × 15, drop to 10 lbs × 10. Ultimate pump finisher."},
   ]}
 };
-const DAY_ORDER = ["MON","TUE","WED","THU","FRI","SAT"];
+let DAY_ORDER = ["MON","TUE","WED","THU","FRI","SAT"];
 
 // ══════════════════════════════════════════════════
 // FOOD DATABASE (per 100g)
@@ -613,7 +613,11 @@ const ST = {
   prChartEx: null,
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {}, showDayPicker: false, extraExercises: [], exSearchQ: "",
   restTimer: null,
-  showBodyModal: false, showFoodModal: false, showTargetEditor: false, showSettings: false, editingStat: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]}, breakdown: null,
+  showBodyModal: false, showFoodModal: false, showTargetEditor: false, showSettings: false, editingStat: null,
+  onboardingStep: parseInt(localStorage.getItem("ob_step")||"1"),
+  onboardingAnswers: JSON.parse(localStorage.getItem("ob_answers")||"{}"),
+  onboardingGenerating: false,
+  onboardingError: null, editingFood: null, foodLookingUp: false, showCheatPanel: false, historyTab: "log", photoUploading: null, viewingPhoto: null, editingLog: null, expandedStat: null, editingCustomFood: null, tempoPopup: null, showMealBuilder: false, mealBuilder: {name:"", ingredients:[], search:"", results:[]}, breakdown: null,
   expandedLog: null,
   foodSearch: "", foodResults: [], foodEntry: {food:null, grams:""}, photoLookingUp: false,
   nutTab: "today",
@@ -3016,6 +3020,7 @@ function renderMealBuilder() {
 // Settings — persisted to localStorage
 var APP_SETTINGS = {
   restTimerEnabled: true,
+  onboardingComplete: false,
 };
 function loadSettings() {
   var saved = S.get("app_settings", null);
@@ -3024,6 +3029,303 @@ function loadSettings() {
 function saveSettings() {
   S.set("app_settings", APP_SETTINGS);
   sbUpsert("user_settings", {key:"app_settings", value:APP_SETTINGS, updated_at:clientTs()});
+}
+
+// ══════════════════════════════════════════════════
+// ONBOARDING — collects goals/stats, generates a personalized plan
+// ══════════════════════════════════════════════════
+const OB_TOTAL_STEPS = 5;
+
+function obSave() {
+  localStorage.setItem("ob_step", String(ST.onboardingStep));
+  localStorage.setItem("ob_answers", JSON.stringify(ST.onboardingAnswers));
+}
+
+function renderOnboarding() {
+  var a = ST.onboardingAnswers;
+  var name = (PROFILES[ACTIVE_PROFILE]&&PROFILES[ACTIVE_PROFILE].label) || "there";
+
+  if(ST.onboardingGenerating) {
+    return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:20px;background:#0a0a0f;padding:20px;text-align:center">
+      <div style="width:44px;height:44px;border:3px solid #2a2a3a;border-top-color:#4f8ef7;border-radius:50%;animation:spin 1s linear infinite"></div>
+      <div style="font-family:var(--font-d);font-size:20px;color:#fff">Building your plan…</div>
+      <div style="font-size:13px;color:#6b6b88;max-width:280px">Creating a personalized workout split and nutrition targets based on your goals. This takes about 20-30 seconds.</div>
+      ${ST.onboardingError ? `<div style="margin-top:10px;padding:12px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:10px;color:#ef4444;font-size:12px;max-width:280px">${ST.onboardingError}</div><button id="ob-retry-btn" class="btn bp" style="padding:10px 20px;margin-top:8px">Try Again</button>` : ""}
+    </div>`;
+  }
+
+  var step = ST.onboardingStep;
+  var progress = Math.round((step/OB_TOTAL_STEPS)*100);
+
+  var body = "";
+  if(step === 1) {
+    body = `
+      <div class="ob-h1">Hi ${name}! Let's set up your plan.</div>
+      <div class="ob-sub">First, some basics.</div>
+      <div class="fgrp"><label class="flbl">Age</label><input class="finput" type="number" inputmode="numeric" id="ob-age" placeholder="30" value="${a.age||""}"></div>
+      <div class="igrid">
+        <div class="fgrp"><label class="flbl">Height (inches)</label><input class="finput" type="number" inputmode="numeric" id="ob-height" placeholder="70" value="${a.height||""}"></div>
+        <div class="fgrp"><label class="flbl">Current Weight (lbs)</label><input class="finput" type="number" inputmode="decimal" id="ob-weight" placeholder="150" value="${a.weight||""}"></div>
+      </div>
+      <div class="fgrp"><label class="flbl">Activity level outside the gym</label>
+        <select class="finput" id="ob-activity">
+          <option value="sedentary" ${a.activity==="sedentary"?"selected":""}>Desk job, mostly sitting</option>
+          <option value="light" ${a.activity==="light"?"selected":""}>Light activity (on feet some of the day)</option>
+          <option value="active" ${a.activity==="active"?"selected":""}>Active job / on feet most of the day</option>
+        </select>
+      </div>`;
+  } else if(step === 2) {
+    body = `
+      <div class="ob-h1">Body measurements</div>
+      <div class="ob-sub">Optional but helps track progress from day one. Skip any you don't know.</div>
+      <div class="igrid">
+        <div class="fgrp"><label class="flbl">Body Fat % (if known)</label><input class="finput" type="number" inputmode="decimal" id="ob-bf" placeholder="25" value="${a.bf||""}"></div>
+        <div class="fgrp"><label class="flbl">Waist (in)</label><input class="finput" type="number" inputmode="decimal" id="ob-waist" placeholder="30" value="${a.waist||""}"></div>
+      </div>
+      <div class="igrid">
+        <div class="fgrp"><label class="flbl">Hips (in)</label><input class="finput" type="number" inputmode="decimal" id="ob-hips" placeholder="38" value="${a.hips||""}"></div>
+        <div class="fgrp"><label class="flbl">Chest (in)</label><input class="finput" type="number" inputmode="decimal" id="ob-chest" placeholder="36" value="${a.chest||""}"></div>
+      </div>`;
+  } else if(step === 3) {
+    var goals = [
+      {v:"fat_loss", l:"🔥 Lose fat"},
+      {v:"muscle_gain", l:"💪 Build muscle"},
+      {v:"recomp", l:"⚖️ Recomp (both)"},
+      {v:"general", l:"❤️ General fitness"},
+      {v:"strength", l:"🏋️ Get stronger"},
+    ];
+    body = `
+      <div class="ob-h1">What's your main goal?</div>
+      <div class="ob-sub">This shapes your whole plan.</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+        ${goals.map(function(g){
+          var sel = a.goal===g.v;
+          return `<button data-ob-goal="${g.v}" style="text-align:left;padding:14px 16px;border-radius:12px;border:1px solid ${sel?"var(--accent)":"var(--border)"};background:${sel?"rgba(79,142,247,.15)":"var(--bg3)"};color:${sel?"var(--accent)":"var(--text)"};font-size:14px;font-weight:600;cursor:pointer;font-family:inherit">${g.l}</button>`;
+        }).join("")}
+      </div>
+      <div class="fgrp"><label class="flbl">Any specific focus areas? (optional)</label><input class="finput" type="text" id="ob-focus" placeholder="e.g. legs, core, arms" value="${a.focus||""}"></div>`;
+  } else if(step === 4) {
+    body = `
+      <div class="ob-h1">Training setup</div>
+      <div class="ob-sub">How and where you'll train.</div>
+      <div class="fgrp"><label class="flbl">Days per week you can train</label>
+        <select class="finput" id="ob-days">
+          ${[3,4,5,6].map(function(n){return `<option value="${n}" ${a.days==n?"selected":""}>${n} days/week</option>`;}).join("")}
+        </select>
+      </div>
+      <div class="fgrp"><label class="flbl">Equipment access</label>
+        <select class="finput" id="ob-equipment">
+          <option value="full_gym" ${a.equipment==="full_gym"?"selected":""}>Full gym</option>
+          <option value="home_gym" ${a.equipment==="home_gym"?"selected":""}>Home gym (limited equipment)</option>
+          <option value="bodyweight" ${a.equipment==="bodyweight"?"selected":""}>Bodyweight only</option>
+        </select>
+      </div>
+      <div class="fgrp"><label class="flbl">Experience level</label>
+        <select class="finput" id="ob-experience">
+          <option value="beginner" ${a.experience==="beginner"?"selected":""}>Beginner (0-1 year)</option>
+          <option value="intermediate" ${a.experience==="intermediate"?"selected":""}>Intermediate (1-3 years)</option>
+          <option value="advanced" ${a.experience==="advanced"?"selected":""}>Advanced (3+ years)</option>
+        </select>
+      </div>
+      <div class="fgrp"><label class="flbl">Injuries or limitations (optional)</label><input class="finput" type="text" id="ob-injuries" placeholder="e.g. bad knee, flat feet" value="${a.injuries||""}"></div>`;
+  } else if(step === 5) {
+    body = `
+      <div class="ob-h1">Nutrition preferences</div>
+      <div class="ob-sub">Almost done — last step.</div>
+      <div class="fgrp"><label class="flbl">Dietary restrictions (optional)</label><input class="finput" type="text" id="ob-diet" placeholder="e.g. vegetarian, no dairy" value="${a.diet||""}"></div>
+      <div class="fgrp"><label class="flbl">Foods you like or want more of (optional)</label><input class="finput" type="text" id="ob-likes" placeholder="e.g. chicken, rice, tacos" value="${a.likes||""}"></div>
+      <div class="fgrp"><label class="flbl">Foods to avoid (optional)</label><input class="finput" type="text" id="ob-dislikes" placeholder="e.g. mushrooms, seafood" value="${a.dislikes||""}"></div>
+      <div style="margin-top:8px;padding:12px;background:rgba(79,142,247,.08);border-radius:10px;font-size:12px;color:var(--muted)">
+        Tapping Generate will create your custom workout plan and nutrition targets. Takes about 20-30 seconds.
+      </div>`;
+  }
+
+  return `
+  <div style="min-height:100dvh;background:#0a0a0f;padding:24px 20px 40px;display:flex;flex-direction:column">
+    <div style="width:100%;height:4px;background:#1a1a24;border-radius:99px;margin-bottom:24px;overflow:hidden">
+      <div style="height:100%;width:${progress}%;background:#4f8ef7;transition:width .3s"></div>
+    </div>
+    <div style="flex:1">${body}</div>
+    <div style="display:flex;gap:10px;margin-top:20px">
+      ${step>1?`<button id="ob-back-btn" class="btn bg" style="flex:1">Back</button>`:""}
+      <button id="ob-next-btn" class="btn bp" style="flex:2">${step===OB_TOTAL_STEPS?"Generate My Plan →":"Continue →"}</button>
+    </div>
+  </div>
+  <style>
+    .ob-h1{font-family:var(--font-d);font-size:22px;color:#fff;margin-bottom:4px}
+    .ob-sub{font-size:13px;color:#6b6b88;margin-bottom:20px}
+  </style>`;
+}
+
+function obCollectStepInputs(step) {
+  var a = ST.onboardingAnswers;
+  if(step===1) {
+    a.age = document.getElementById("ob-age")?.value || a.age;
+    a.height = document.getElementById("ob-height")?.value || a.height;
+    a.weight = document.getElementById("ob-weight")?.value || a.weight;
+    a.activity = document.getElementById("ob-activity")?.value || a.activity;
+  } else if(step===2) {
+    a.bf = document.getElementById("ob-bf")?.value || a.bf;
+    a.waist = document.getElementById("ob-waist")?.value || a.waist;
+    a.hips = document.getElementById("ob-hips")?.value || a.hips;
+    a.chest = document.getElementById("ob-chest")?.value || a.chest;
+  } else if(step===3) {
+    a.focus = document.getElementById("ob-focus")?.value || a.focus;
+  } else if(step===4) {
+    a.days = document.getElementById("ob-days")?.value || a.days;
+    a.equipment = document.getElementById("ob-equipment")?.value || a.equipment;
+    a.experience = document.getElementById("ob-experience")?.value || a.experience;
+    a.injuries = document.getElementById("ob-injuries")?.value || a.injuries;
+  } else if(step===5) {
+    a.diet = document.getElementById("ob-diet")?.value || a.diet;
+    a.likes = document.getElementById("ob-likes")?.value || a.likes;
+    a.dislikes = document.getElementById("ob-dislikes")?.value || a.dislikes;
+  }
+  obSave();
+}
+
+async function obGeneratePlan() {
+  ST.onboardingGenerating = true;
+  ST.onboardingError = null;
+  renderOnboardingScreen();
+
+  var a = ST.onboardingAnswers;
+  var name = (PROFILES[ACTIVE_PROFILE]&&PROFILES[ACTIVE_PROFILE].label) || "User";
+  var days = parseInt(a.days)||5;
+
+  var prompt = `Create a personalized ${days}-day/week workout plan and nutrition targets for this person:
+
+Name: ${name}
+Age: ${a.age||"not given"}
+Height: ${a.height||"?"} inches
+Weight: ${a.weight||"?"} lbs
+Body fat: ${a.bf||"not given"}%
+Activity level (non-exercise): ${a.activity||"sedentary"}
+Goal: ${a.goal||"general fitness"}
+Focus areas: ${a.focus||"none specified"}
+Training days per week: ${days}
+Equipment access: ${a.equipment||"full_gym"}
+Experience level: ${a.experience||"beginner"}
+Injuries/limitations: ${a.injuries||"none"}
+Dietary restrictions: ${a.diet||"none"}
+Foods they like: ${a.likes||"no preference"}
+Foods to avoid: ${a.dislikes||"none"}
+
+Respond with ONLY a JSON object, no other text, in this exact shape:
+{
+  "targets": {"cal": 2000, "p": 150, "c": 200, "f": 60, "water": 3.0},
+  "dayOrder": ["MON","WED","FRI"],
+  "plan": {
+    "MON": {
+      "id":"MON","label":"Monday","title":"Full Body","color":"#4f8ef7","emoji":"🏋️",
+      "duration":"45 min","muscles":"Full Body",
+      "exercises":[
+        {"id":"goblet_squat","name":"Goblet Squat","sets":3,"reps":"10-12","tempo":"3-1-1","rest":"90 sec","muscles":"Quads, glutes","tip":"Keep chest up"}
+      ]
+    }
+  }
+}
+
+Rules:
+- dayOrder must contain exactly ${days} day codes from this list in weekday order: MON, TUE, WED, THU, FRI, SAT, SUN
+- plan must have one entry for every day in dayOrder, spacing muscle groups sensibly across the week
+- Pick a sensible split for ${days} days/week (e.g. 3 days = full body, 4-5 = upper/lower or push/pull/legs, 6 = body part split)
+- 6-9 exercises per day, appropriate for ${a.experience||"beginner"} level and ${a.equipment||"full_gym"} equipment
+- If bodyweight only, use only bodyweight exercise variations
+- Respect any injuries/limitations by avoiding contraindicated movements
+- Calculate targets using standard sports nutrition formulas (Mifflin-St Jeor + activity factor + goal adjustment: deficit for fat_loss, surplus for muscle_gain, slight deficit for recomp, maintenance for general/strength)
+- Each exercise needs: id (lowercase_underscore), name, sets, reps, tempo, rest, muscles, tip
+- Use a distinct hex color and relevant emoji per day`;
+
+  try {
+    const resp = await fetch("https://fitness-proxy.leonsilvadiego.workers.dev", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({model:"claude-sonnet-4-5", max_tokens:4096, messages:[{role:"user",content:prompt}]})
+    });
+    const json = await resp.json();
+    const text = json.content?.[0]?.text || "";
+    const match = text.match(/\{[\s\S]*\}/);
+    if(!match) throw new Error("Could not parse AI response");
+    const parsed = JSON.parse(match[0]);
+    if(!parsed.plan || !parsed.dayOrder || !parsed.targets) throw new Error("Incomplete plan generated");
+
+    // Apply the generated plan
+    PLAN = parsed.plan;
+    DAY_ORDER = parsed.dayOrder;
+    Object.assign(TARGETS, parsed.targets);
+    saveTargets();
+
+    // Save custom plan to Supabase + localStorage
+    S.set("custom_plan", {plan: PLAN, dayOrder: DAY_ORDER});
+    sbUpsert("user_settings", {key:"custom_plan", value:{plan:PLAN, dayOrder:DAY_ORDER}, updated_at:clientTs()});
+
+    // Save first body stat entry from onboarding data
+    if(a.weight) {
+      var initialStat = {
+        id: "onboarding_" + Date.now(),
+        date: new Date().toISOString().split("T")[0],
+        weight: parseFloat(a.weight)||null,
+        bf: parseFloat(a.bf)||null,
+        waist: parseFloat(a.waist)||null,
+        hips: parseFloat(a.hips)||null,
+        chest: parseFloat(a.chest)||null,
+        notes: "Starting point (onboarding)"
+      };
+      ST.bodyStats.unshift(initialStat);
+      saveBodyStat(initialStat);
+    }
+
+    // Mark onboarding complete
+    APP_SETTINGS.onboardingComplete = true;
+    saveSettings();
+    localStorage.removeItem("ob_step");
+    localStorage.removeItem("ob_answers");
+    ST.onboardingGenerating = false;
+    save();
+    render();
+  } catch(err) {
+    console.error("Onboarding plan generation error:", err);
+    ST.onboardingError = "Something went wrong generating your plan. Check your connection and try again.";
+    ST.onboardingGenerating = false;
+    renderOnboardingScreen();
+  }
+}
+
+function renderOnboardingScreen() {
+  var appEl = document.getElementById("app");
+  if(!appEl) return;
+  appEl.innerHTML = renderOnboarding();
+  attachOnboardingListeners();
+}
+
+function attachOnboardingListeners() {
+  document.querySelectorAll("[data-ob-goal]").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      ST.onboardingAnswers.goal = btn.dataset.obGoal;
+      obSave();
+      renderOnboardingScreen();
+    });
+  });
+  document.getElementById("ob-back-btn")?.addEventListener("click", function(){
+    obCollectStepInputs(ST.onboardingStep);
+    ST.onboardingStep = Math.max(1, ST.onboardingStep-1);
+    obSave();
+    renderOnboardingScreen();
+  });
+  document.getElementById("ob-next-btn")?.addEventListener("click", function(){
+    obCollectStepInputs(ST.onboardingStep);
+    if(ST.onboardingStep < OB_TOTAL_STEPS) {
+      ST.onboardingStep++;
+      obSave();
+      renderOnboardingScreen();
+    } else {
+      obGeneratePlan();
+    }
+  });
+  document.getElementById("ob-retry-btn")?.addEventListener("click", function(){
+    ST.onboardingError = null;
+    obGeneratePlan();
+  });
 }
 
 function renderSettings() {
@@ -5019,12 +5321,37 @@ function showLoader() {
 
 function loadFromCache() {
   ST.workoutLogs   = S.get("wl", []);
-  ST.bodyStats     = S.get("bs", [{id:"init", date:new Date().toISOString().split("T")[0], weight:173, bf:19, waist:null, notes:"Starting point"}]);
+  ST.bodyStats     = S.get("bs", []);
   ST.nutritionLogs = S.get("nl", []);
   ST.aiReports     = S.get("air", []);
   ST.customFoods   = S.get("cf", []);
   ST.dailyLogs     = S.get("dl", []);
   ST.online        = false;
+  // Custom plan may already be cached locally from a previous successful load
+  var cachedPlan = S.get("custom_plan", null);
+  if(cachedPlan && cachedPlan.plan && cachedPlan.dayOrder) {
+    PLAN = cachedPlan.plan;
+    DAY_ORDER = cachedPlan.dayOrder;
+  }
+}
+
+// Shared onboarding gate — call after any data source finishes loading (Supabase, cache, or timeout)
+function finishBootAndRender(customPlanLoaded) {
+  if(!APP_SETTINGS.onboardingComplete) {
+    if(customPlanLoaded) {
+      APP_SETTINGS.onboardingComplete = true;
+      saveSettings();
+    } else if(ST.workoutLogs.length > 0 || ST.bodyStats.length > 0) {
+      // Existing data predates the onboarding feature — skip silently
+      APP_SETTINGS.onboardingComplete = true;
+      saveSettings();
+    } else {
+      // Truly fresh profile with zero data anywhere — show onboarding
+      renderOnboardingScreen();
+      return;
+    }
+  }
+  render();
 }
 
 function boot() {
@@ -5043,7 +5370,7 @@ function boot() {
   // Set a 6 second timeout — if Supabase doesn't respond, use cache
   var timer = setTimeout(function() {
     loadFromCache();
-    render();
+    finishBootAndRender(false);
   }, 6000);
 
   Promise.all([
@@ -5058,6 +5385,7 @@ function boot() {
   ]).then(function(results) {
     clearTimeout(timer);
     var wl = results[0], bs = results[1], nl = results[2], air = results[3], cf = results[4], dl = results[5], ce = results[6], us = results[7];
+    var customPlanLoaded = false;
 
     if(wl !== null) {
       ST.workoutLogs   = wl.map(function(r)  { return {id:r.id, dayId:r.day_id, date:r.date, duration:r.duration, exercises:r.exercises||[]}; });
@@ -5078,10 +5406,16 @@ function boot() {
         if(!localCe.find(function(e){return e.id===ex.id;})) { localCe.push(ex); S.set("custom_exercises", localCe); }
       });
 
-      // Load user settings (targets + app settings)
+      // Load user settings (targets + app settings + custom plan)
       (us||[]).forEach(function(r){
         if(r.key==="targets" && r.value) { Object.assign(TARGETS, r.value); S.set("targets", TARGETS); }
         if(r.key==="app_settings" && r.value) { Object.assign(APP_SETTINGS, r.value); S.set("app_settings", APP_SETTINGS); }
+        if(r.key==="custom_plan" && r.value && r.value.plan && r.value.dayOrder) {
+          PLAN = r.value.plan;
+          DAY_ORDER = r.value.dayOrder;
+          S.set("custom_plan", r.value);
+          customPlanLoaded = true;
+        }
       });
 
       S.set("wl",  ST.workoutLogs);
@@ -5094,11 +5428,11 @@ function boot() {
     } else {
       loadFromCache();
     }
-    render();
+    finishBootAndRender(customPlanLoaded);
   }).catch(function() {
     clearTimeout(timer);
     loadFromCache();
-    render();
+    finishBootAndRender(false);
   });
 }
 
