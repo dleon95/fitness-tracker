@@ -249,12 +249,14 @@ const PROFILES = {
   diego: {
     label: "Diego",
     emoji: "💪",
+    pinHash: "d75303b3fa82f43dd4b41fb02b2790f70d65b057e6484e6bda409d15b418aa66",
     url: "https://cpjwxsanjxafozzdewrd.supabase.co",
     key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNwand4c2FuanhhZm96emRld3JkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgzNDMxMTQsImV4cCI6MjA5MzkxOTExNH0.OXgHDAtv40Oy8CaREnGH6t7gX4dhR9Geca8dAWNkrQk"
   },
   ariana: {
     label: "Ariana",
     emoji: "🌸",
+    pinHash: "fafd2274260ad2e782ed6b8ef8e7103a77924effc2cd619957790d1390bb69d6",
     url: "https://fecwnmenfswwfxcgvrai.supabase.co",
     key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZlY3dubWVuZnN3d2Z4Y2d2cmFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1NjE1ODksImV4cCI6MjA5OTEzNzU4OX0.-kvQ-P1aY4Gu386T0eemJneJAtDinJ2X17iiDZqCyug"
   }
@@ -265,10 +267,22 @@ var ACTIVE_PROFILE = localStorage.getItem("app_profile");
 var SUPA_URL = ACTIVE_PROFILE && PROFILES[ACTIVE_PROFILE] ? PROFILES[ACTIVE_PROFILE].url : "";
 var SUPA_KEY = ACTIVE_PROFILE && PROFILES[ACTIVE_PROFILE] ? PROFILES[ACTIVE_PROFILE].key : "";
 
+function isUnlocked(name) {
+  return !!(PROFILES[name] && localStorage.getItem("unlock_" + name) === PROFILES[name].pinHash);
+}
+
 function selectProfile(name) {
   if(!PROFILES[name]) return;
+  if(!isUnlocked(name)) { showPinScreen(name); return; }
   localStorage.setItem("app_profile", name);
   location.reload(); // simplest, safest way to fully re-init with new credentials
+}
+
+async function pinMatches(name, pin) {
+  if(!(window.crypto && crypto.subtle)) return false;
+  var buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("dft1:" + name + ":" + pin));
+  var hex = Array.from(new Uint8Array(buf)).map(function(b){ return b.toString(16).padStart(2, "0"); }).join("");
+  return hex === PROFILES[name].pinHash;
 }
 
 function sbHeaders() {
@@ -1612,6 +1626,13 @@ function fmtReport(t) {
 // ══════════════════════════════════════════════════
 // RENDER ENGINE
 // ══════════════════════════════════════════════════
+// Re-render the page but put the scroll position back where it was
+function renderKeepScroll() {
+  var pg = document.getElementById("pg"); var sy = pg ? pg.scrollTop : 0;
+  render();
+  requestAnimationFrame(function(){ var p2 = document.getElementById("pg"); if(p2) p2.scrollTop = sy; });
+}
+
 function render() {
   // Destroy existing charts before rebuilding DOM
   if(ST.charts) Object.values(ST.charts).forEach(c=>{try{c.destroy();}catch{}});
@@ -4733,6 +4754,7 @@ function attachAll() {
     e.stopPropagation();
     if(confirm("Switch to a different profile? This only changes which account this device is signed into — your data stays safe under your current profile.")) {
       localStorage.removeItem("app_profile");
+      Object.keys(PROFILES).forEach(function(k){ localStorage.removeItem("unlock_" + k); });
       location.reload();
     }
   });
@@ -4872,7 +4894,7 @@ function attachAll() {
   }));
 
   // HISTORY EXPAND
-  $$("[data-exp-log]").forEach(el=>el.addEventListener("click",()=>{ST.expandedLog=ST.expandedLog===el.dataset.expLog?null:el.dataset.expLog;render();}));
+  $$("[data-exp-log]").forEach(el=>el.addEventListener("click",()=>{ST.expandedLog=ST.expandedLog===el.dataset.expLog?null:el.dataset.expLog;renderKeepScroll();}));
 
   // ADD EXERCISE TO PAST LOG
   $$("[data-add-log-ex]").forEach(el=>el.addEventListener("click",e=>{
@@ -4895,7 +4917,7 @@ function attachAll() {
   $$("[data-edit-log]").forEach(el=>el.addEventListener("click",e=>{
     e.stopPropagation();
     const log = ST.workoutLogs.find(l=>l.id===el.dataset.editLog);
-    if(log) { ST.editingLog = JSON.parse(JSON.stringify(log)); render(); } // deep copy
+    if(log) { ST.editingLog = JSON.parse(JSON.stringify(log)); renderKeepScroll(); } // deep copy
   }));
 
   // DELETE LOG
@@ -4904,7 +4926,7 @@ function attachAll() {
     if(!confirm("Delete this workout session?")) return;
     const id=el.dataset.delLog;
     ST.workoutLogs=ST.workoutLogs.filter(l=>l.id!==id);
-    save(); deleteFromCloud("workout_logs",id); render();
+    save(); deleteFromCloud("workout_logs",id); renderKeepScroll();
   }));
 
   // EDIT LOG MODAL
@@ -5767,12 +5789,89 @@ function showProfilePicker() {
   });
 }
 
+function showPinScreen(name) {
+  var p = PROFILES[name];
+  var appEl = document.getElementById("app");
+  if(!p || !appEl) return;
+  var entered = "";
+  var busy = false;
+
+  function lockSecondsLeft() {
+    try {
+      var f = JSON.parse(localStorage.getItem("pin_fail") || "{}");
+      return f.until && f.until > Date.now() ? Math.ceil((f.until - Date.now()) / 1000) : 0;
+    } catch(e) { return 0; }
+  }
+
+  function draw(msg) {
+    var dots = [0,1,2,3].map(function(i){
+      var on = i < entered.length;
+      return '<div style="width:14px;height:14px;border-radius:50%;border:2px solid '+(on?'#4f8ef7':'#3a3a4a')+';background:'+(on?'#4f8ef7':'transparent')+'"></div>';
+    }).join("");
+    var keys = ["1","2","3","4","5","6","7","8","9","","0","⌫"].map(function(k){
+      if(k === "") return '<div></div>';
+      return '<button data-pin-key="'+k+'" style="height:64px;border-radius:50%;background:#1a1a24;border:1px solid #2a2a3a;color:#fff;font-size:'+(k==="⌫"?'22px':'26px')+';font-family:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent">'+k+'</button>';
+    }).join("");
+    appEl.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100dvh;gap:22px;background:#0a0a0f;padding:20px">'
+      + '<div style="text-align:center"><div style="font-size:40px">'+p.emoji+'</div>'
+      + '<div style="font-size:18px;font-weight:700;color:#fff;margin-top:6px">'+p.label+'</div>'
+      + '<div style="font-size:13px;color:#6b6b88;margin-top:4px">Enter your 4-digit code</div></div>'
+      + '<div style="display:flex;gap:14px">'+dots+'</div>'
+      + '<div style="min-height:18px;font-size:12px;color:#ef4444;text-align:center">'+(msg||"")+'</div>'
+      + '<div style="display:grid;grid-template-columns:repeat(3,64px);gap:14px">'+keys+'</div>'
+      + '<button id="pin-back" style="background:none;border:none;color:#6b6b88;font-size:13px;cursor:pointer;font-family:inherit;margin-top:6px">← Choose a different profile</button>'
+      + '</div>';
+    appEl.querySelectorAll("[data-pin-key]").forEach(function(b){
+      b.addEventListener("click", function(){ press(b.dataset.pinKey); });
+    });
+    document.getElementById("pin-back").addEventListener("click", function(){
+      localStorage.removeItem("app_profile");
+      showProfilePicker();
+    });
+  }
+
+  async function press(k) {
+    if(busy) return;
+    var left = lockSecondsLeft();
+    if(left > 0) { draw("Too many wrong tries. Try again in "+left+"s."); return; }
+    if(k === "⌫") { entered = entered.slice(0, -1); draw(""); return; }
+    if(entered.length >= 4) return;
+    entered += k;
+    draw("");
+    if(entered.length < 4) return;
+    busy = true;
+    var ok = false;
+    try { ok = await pinMatches(name, entered); } catch(e) { ok = false; }
+    busy = false;
+    if(ok) {
+      localStorage.removeItem("pin_fail");
+      localStorage.setItem("unlock_" + name, p.pinHash);
+      localStorage.setItem("app_profile", name);
+      location.reload();
+      return;
+    }
+    var f = {}; try { f = JSON.parse(localStorage.getItem("pin_fail") || "{}"); } catch(e) {}
+    f.n = (f.n || 0) + 1;
+    var msg = "Wrong code. Try again.";
+    if(f.n >= 5) { f = {n: 0, until: Date.now() + 60000}; msg = "Too many wrong tries. Try again in 60s."; }
+    localStorage.setItem("pin_fail", JSON.stringify(f));
+    entered = "";
+    draw(msg);
+  }
+
+  draw(lockSecondsLeft() > 0 ? "Too many wrong tries. Try again in "+lockSecondsLeft()+"s." : "");
+}
+
+function startApp() {
+  if(!ACTIVE_PROFILE || !PROFILES[ACTIVE_PROFILE]) { showProfilePicker(); }
+  else if(!isUnlocked(ACTIVE_PROFILE)) { showPinScreen(ACTIVE_PROFILE); }
+  else { boot(); }
+}
+
 if(document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", function(){
-    if(!ACTIVE_PROFILE || !PROFILES[ACTIVE_PROFILE]) { showProfilePicker(); } else { boot(); }
-  });
+  document.addEventListener("DOMContentLoaded", startApp);
 } else {
-  if(!ACTIVE_PROFILE || !PROFILES[ACTIVE_PROFILE]) { showProfilePicker(); } else { boot(); }
+  startApp();
 }
 </script>
 </body>
