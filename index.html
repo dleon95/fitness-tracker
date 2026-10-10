@@ -618,6 +618,7 @@ const ST = {
   workoutView: "plan",
   prView: "records",
   prChartEx: null,
+  prSelPoint: null,
   activeDay: null, activeSets: {}, openEx: {}, openGuide: {}, showDayPicker: false, extraExercises: [], exSearchQ: "",
   restTimer: null,
   showBodyModal: false, showFoodModal: false, showTargetEditor: false, showSettings: false, editingStat: null,
@@ -3873,7 +3874,7 @@ function prBuildExerciseHistory() {
       var maxW = Math.max(0, ...(ex.sets||[]).map(function(s){return parseFloat(s.weight)||0;}));
       if(maxW > 0) {
         if(!h[ex.name]) h[ex.name] = [];
-        h[ex.name].push({date:log.date, weight:maxW});
+        h[ex.name].push({date:log.date, weight:maxW, logId:log.id, dayId:log.dayId, sets:(ex.sets||[]).filter(function(s){return s.weight||s.reps;}).map(function(s){return {weight:s.weight, reps:s.reps};})});
       }
     });
   });
@@ -3947,7 +3948,9 @@ function prChartBodyHTML(h, sel, rangeKey) {
   var dots = pts.map(function(p,i){
     var isMax = p.d.weight === maxW;
     return '<circle cx="'+p.x.toFixed(1)+'" cy="'+p.y.toFixed(1)+'" r="'+(isMax?5:3)+'" fill="'+(isMax?"#22c55e":"#4f8ef7")+'" stroke="'+(isMax?"rgba(34,197,94,.3)":"rgba(79,142,247,.3)")+'" stroke-width="'+(isMax?4:2)+'"/>'
-      + ((i===data.length-1||isMax)?'<text x="'+p.x.toFixed(1)+'" y="'+(p.y-8).toFixed(1)+'" text-anchor="middle" font-size="9" fill="'+(isMax?"#22c55e":"#4f8ef7")+'" font-weight="700">'+p.d.weight+'lbs</text>':"");
+      + ((i===data.length-1||isMax)?'<text x="'+p.x.toFixed(1)+'" y="'+(p.y-8).toFixed(1)+'" text-anchor="middle" font-size="9" fill="'+(isMax?"#22c55e":"#4f8ef7")+'" font-weight="700">'+p.d.weight+'lbs</text>':"")
+      + (String(p.d.logId)===String(ST.prSelPoint)?'<circle cx="'+p.x.toFixed(1)+'" cy="'+p.y.toFixed(1)+'" r="9" fill="none" stroke="#fff" stroke-width="1.5"/>':"")
+      + '<circle data-pr-point="'+encodeURIComponent(p.d.logId)+'" cx="'+p.x.toFixed(1)+'" cy="'+p.y.toFixed(1)+'" r="14" fill="rgba(0,0,0,0)" style="cursor:pointer"/>';
   }).join("");
   var xl = pts.filter(function(_,i){return i===0||i===pts.length-1||i===Math.floor(pts.length/2);}).map(function(p){
     return '<text x="'+p.x.toFixed(1)+'" y="'+(chartH-4)+'" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.3)">'+p.d.date.slice(5)+'</text>';
@@ -3956,6 +3959,24 @@ function prChartBodyHTML(h, sel, rangeKey) {
   var card = function(label, value, sub, color) {
     return '<div style="background:var(--bg3);border-radius:var(--rs);padding:8px;text-align:center"><div style="font-size:10px;color:var(--muted)">'+label+'</div><div style="font-weight:700;font-size:16px;'+(color?'color:'+color:'')+'">'+value+'</div><div style="font-size:10px;color:'+(color||'var(--muted)')+';min-height:13px">'+sub+'</div></div>';
   };
+
+  var selPt = data.find(function(d){ return String(d.logId)===String(ST.prSelPoint); });
+  var detail = "";
+  if(selPt) {
+    var dp = PLAN[selPt.dayId];
+    var dl = dp ? (dp.label + (dp.title ? " · " + dp.title : "")) : "";
+    var setRows = selPt.sets.map(function(s,i){
+      var w = parseFloat(s.weight)||0;
+      var top = w > 0 && w === selPt.weight;
+      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border);font-size:13px;'+(top?'color:var(--accent);font-weight:700':'')+'"><span style="color:var(--muted);font-weight:400">Set '+(i+1)+'</span><span>'+(w>0?w+' lbs':'BW')+' × '+(s.reps||'—')+'</span></div>';
+    }).join("");
+    detail = '<div style="margin-top:12px;background:var(--bg3);border:1px solid rgba(79,142,247,.3);border-radius:var(--rs);padding:12px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px"><div style="font-weight:700;font-size:14px">'+fmtDate(selPt.date)+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">'+prEsc(dl)+'</div></div>'
+      + setRows
+      + '<button data-pr-edit="'+encodeURIComponent(selPt.logId)+'" class="btn bg" style="width:100%;margin-top:10px;font-size:13px;padding:9px">✏️ Edit this workout</button></div>';
+  } else {
+    detail = '<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:8px">Tap a point to see that session\'s sets</div>';
+  }
 
   return pills + head
     + '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">'+data.length+' sessions · Best: '+maxW+' lbs · '+data[0].date.slice(5)+' → '+data[data.length-1].date.slice(5)+'</div>'
@@ -3969,7 +3990,8 @@ function prChartBodyHTML(h, sel, rangeKey) {
     + card("First", first+'<span style="font-size:10px;color:var(--muted)">lbs</span>', data[0].date.slice(5), "")
     + card("Latest", latest+'<span style="font-size:10px;color:var(--muted)">lbs</span>', data[data.length-1].date.slice(5), "")
     + card("Change", sign+diffR+'<span style="font-size:10px">lbs</span>', sign+pctR+'%', col)
-    + '</div>';
+    + '</div>'
+    + detail;
 }
 
 function renderProgressCharts() {
@@ -4886,12 +4908,18 @@ function attachAll() {
   }));
 
   // EDIT LOG MODAL
-  $("[data-action='close-edit-log']")?.addEventListener("click",()=>{ST.editingLog=null;render();});
+  $("[data-action='close-edit-log']")?.addEventListener("click",()=>{
+    var pgC=document.getElementById("pg"); var syC=pgC?pgC.scrollTop:0;
+    ST.editingLog=null; render();
+    requestAnimationFrame(function(){ var pgC2=document.getElementById("pg"); if(pgC2) pgC2.scrollTop=syC; });
+  });
   $("[data-action='save-edit-log']")?.addEventListener("click",()=>{
     if(!ST.editingLog) return;
+    var pgS=document.getElementById("pg"); var syS=pgS?pgS.scrollTop:0;
     const idx=ST.workoutLogs.findIndex(l=>l.id===ST.editingLog.id);
     if(idx>=0){ ST.workoutLogs[idx]=ST.editingLog; saveWorkoutLog(ST.editingLog); }
     ST.editingLog=null; render();
+    requestAnimationFrame(function(){ var pgS2=document.getElementById("pg"); if(pgS2) pgS2.scrollTop=syS; });
   });
   $$("[data-elw]").forEach(el=>el.addEventListener("input",()=>{
     const ei=+el.dataset.elw, si=+el.dataset.esi;
@@ -5208,11 +5236,36 @@ function attachAll() {
         if(!wasOpen) { var si = document.getElementById("pr-ex-search"); if(si) si.focus(); }
         return;
       }
+      var ptEl = e.target.closest("[data-pr-point]");
+      if(ptEl) {
+        var ptId = decodeURIComponent(ptEl.dataset.prPoint);
+        ST.prSelPoint = (String(ST.prSelPoint)===ptId) ? null : ptId;
+        document.getElementById("pr-chart-body").innerHTML = prChartBodyHTML(h, prResolveSel(h), S.get("pr_range", "ALL"));
+        return;
+      }
+      var editEl = e.target.closest("[data-pr-edit]");
+      if(editEl) {
+        var editId = decodeURIComponent(editEl.dataset.prEdit);
+        var logToEdit = ST.workoutLogs.find(function(l){ return String(l.id)===editId; });
+        if(logToEdit) {
+          var pgE = document.getElementById("pg"); var syE = pgE ? pgE.scrollTop : 0;
+          ST.editingLog = JSON.parse(JSON.stringify(logToEdit));
+          render();
+          requestAnimationFrame(function(){ var pgE2 = document.getElementById("pg"); if(pgE2) pgE2.scrollTop = syE; });
+        }
+        return;
+      }
+      if(e.target.closest("#pr-chart-body svg") && ST.prSelPoint !== null) {
+        ST.prSelPoint = null;
+        document.getElementById("pr-chart-body").innerHTML = prChartBodyHTML(h, prResolveSel(h), S.get("pr_range", "ALL"));
+        return;
+      }
       var pick = e.target.closest("[data-pr-pick]");
       if(pick) {
         var name = decodeURIComponent(pick.dataset.prPick);
         if(!h[name]) return;
         ST.prChartEx = name;
+        ST.prSelPoint = null;
         var si2 = document.getElementById("pr-ex-search"); if(si2) si2.value = "";
         document.getElementById("pr-ex-label").textContent = name;
         document.getElementById("pr-ex-panel").style.display = "none";
