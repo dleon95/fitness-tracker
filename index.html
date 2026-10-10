@@ -1000,6 +1000,95 @@ function autoCheckSet(eid, si) {
   }
 }
 
+// ── EXERCISE HISTORY SHEET ───────────────────────────
+// Built directly in the document (not via render()) so opening, switching
+// ranges, and closing never touch the workout screen or its scroll position.
+var HIST_RANGES = [
+  {k:"2W", label:"2W", days:14},
+  {k:"4W", label:"4W", days:28},
+  {k:"8W", label:"8W", days:56},
+  {k:"3M", label:"3M", days:90},
+  {k:"ALL", label:"All", days:null},
+];
+
+function getExSessions(exId, exName, rangeKey) {
+  var range = HIST_RANGES.find(function(r){return r.k===rangeKey;}) || HIST_RANGES[1];
+  var out = [];
+  [...ST.workoutLogs].sort(function(a,b){return new Date(b.date)-new Date(a.date);}).forEach(function(log){
+    if(range.days !== null && daysAgo(log.date) > range.days) return;
+    var ex = (log.exercises||[]).find(function(e){ return e.id===exId || e.name===exName; });
+    if(!ex) return;
+    var sets = (ex.sets||[]).filter(function(s){ return s.weight||s.reps; });
+    if(sets.length === 0) return;
+    out.push({date:log.date, dayId:log.dayId, sets:sets});
+  });
+  return out;
+}
+
+function histSheetBody(exId, exName, rangeKey) {
+  var sessions = getExSessions(exId, exName, rangeKey);
+  var topW = 0;
+  sessions.forEach(function(s){ s.sets.forEach(function(x){ topW = Math.max(topW, parseFloat(x.weight)||0); }); });
+  var pills = HIST_RANGES.map(function(r){
+    var on = r.k===rangeKey;
+    return '<button data-hist-range="'+r.k+'" style="flex:1;padding:7px 4px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid '+(on?"var(--accent)":"var(--border)")+';background:'+(on?"rgba(79,142,247,.15)":"var(--bg3)")+';color:'+(on?"var(--accent)":"var(--muted)")+'">'+r.label+'</button>';
+  }).join("");
+  var rows = sessions.length === 0
+    ? '<div style="padding:24px 8px;text-align:center;font-size:13px;color:var(--muted)">No sessions logged in this range. Try a longer one.</div>'
+    : sessions.map(function(s){
+        var setsTxt = s.sets.map(function(x){
+          var w = parseFloat(x.weight)||0, r = x.reps||"—";
+          var isTop = w>0 && w===topW;
+          var t = w>0 ? (w+"×"+r) : (""+r);
+          return '<span style="'+(isTop?"color:var(--accent);font-weight:700":"")+'">'+t+'</span>';
+        }).join(' <span style="color:var(--muted)">·</span> ');
+        var dayLbl = (PLAN[s.dayId]&&PLAN[s.dayId].label) || "";
+        return '<div style="padding:10px 0;border-top:1px solid var(--border)">'
+          + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px"><div style="font-weight:700;font-size:13px">'+fmtDate(s.date)+'</div><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">'+dayLbl+'</div></div>'
+          + '<div style="font-size:13px;line-height:1.5">'+setsTxt+'</div></div>';
+      }).join("");
+  var summary = sessions.length === 0 ? "" :
+    '<div style="font-size:11px;color:var(--muted);margin:10px 0 2px">'+sessions.length+' session'+(sessions.length===1?"":"s")+(topW>0?' · top weight '+topW+' lbs':'')+'</div>';
+  return '<div style="display:flex;gap:6px;margin-bottom:4px">'+pills+'</div>'+summary+rows;
+}
+
+function openHistorySheet(exId, exName) {
+  closeHistorySheet();
+  var rangeKey = S.get("hist_range", "4W");
+  var ov = document.createElement("div");
+  ov.id = "hist-overlay";
+  ov.className = "moverlay";
+  ov.innerHTML = '<div class="modal" style="max-height:80dvh">'
+    + '<div class="mhandle"></div>'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px">'
+    +   '<div style="min-width:0"><div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">History</div>'
+    +   '<div style="font-family:var(--font-d);font-size:20px;letter-spacing:.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+exName+'</div></div>'
+    +   '<button id="hist-close-btn" style="background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;padding:4px;flex-shrink:0">✕</button>'
+    + '</div>'
+    + '<div id="hist-body">'+histSheetBody(exId, exName, rangeKey)+'</div>'
+    + '</div>';
+  document.body.appendChild(ov);
+
+  function wireRanges() {
+    ov.querySelectorAll("[data-hist-range]").forEach(function(b){
+      b.addEventListener("click", function(){
+        rangeKey = b.dataset.histRange;
+        S.set("hist_range", rangeKey);
+        var body = document.getElementById("hist-body");
+        if(body) { body.innerHTML = histSheetBody(exId, exName, rangeKey); wireRanges(); }
+      });
+    });
+  }
+  wireRanges();
+  document.getElementById("hist-close-btn").addEventListener("click", closeHistorySheet);
+  ov.addEventListener("click", function(e){ if(e.target === ov) closeHistorySheet(); });
+}
+
+function closeHistorySheet() {
+  var ov = document.getElementById("hist-overlay");
+  if(ov) ov.remove();
+}
+
 function getExSkipCount(exId, exName, dayId) {
   // Get the last N logs for this specific day
   var dayLogs = ST.workoutLogs.filter(function(l){ return l.dayId === dayId; }).slice(0, 4);
@@ -2194,8 +2283,9 @@ function renderExBlock(ex, idx) {
       <div class="exarr${open?" open":""}">⌄</div>
     </div>
     ${open?`
-    <div style="padding:0 14px 10px">
-      <button class="btn bg" style="width:100%;font-size:12px;padding:8px" data-toggle-guide="${ex.id}">${guideOpen?"Hide Form Guide":"📋 Form Guide"}</button>
+    <div style="padding:0 14px 10px;display:flex;gap:8px">
+      <button class="btn bg" style="flex:1;font-size:12px;padding:8px" data-toggle-guide="${ex.id}">${guideOpen?"Hide Form Guide":"📋 Form Guide"}</button>
+      <button class="btn bg" style="flex:1;font-size:12px;padding:8px" data-open-history="${ex.id}" data-hist-name="${String(ex.name).replace(/"/g,"&quot;")}">📈 History</button>
     </div>
     ${guideOpen?`<div class="fguide"><div class="fg-body">
       ${(ex.steps&&ex.steps.length>0)?`<div class="fg-sec"><div class="fg-ttl">Step-by-Step</div>${ex.steps.map((s,i)=>`<div class="fg-step"><div class="fg-snum">${i+1}</div><div>${s}</div></div>`).join("")}</div>`:""}
@@ -3772,91 +3862,132 @@ function renderCoach() {
 }
 
 // ── HISTORY ────────────────────────────────────────
-function renderProgressCharts() {
-  // Get all exercises that have been logged with weight
-  var exerciseHistory = {};
+// ── PROGRESS CHARTS (searchable dropdown + date range + consistent stats) ──
+function prEsc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+function prBuildExerciseHistory() {
+  var h = {};
   ST.workoutLogs.forEach(function(log){
     (log.exercises||[]).forEach(function(ex){
-      var maxW = Math.max(...(ex.sets||[]).map(s=>parseFloat(s.weight)||0));
+      if(!ex.name) return;
+      var maxW = Math.max(0, ...(ex.sets||[]).map(function(s){return parseFloat(s.weight)||0;}));
       if(maxW > 0) {
-        if(!exerciseHistory[ex.name]) exerciseHistory[ex.name] = [];
-        exerciseHistory[ex.name].push({date:log.date, weight:maxW});
+        if(!h[ex.name]) h[ex.name] = [];
+        h[ex.name].push({date:log.date, weight:maxW});
       }
     });
   });
-  // Sort each exercise history by date
-  Object.keys(exerciseHistory).forEach(function(name){
-    exerciseHistory[name].sort(function(a,b){return new Date(a.date)-new Date(b.date);});
-  });
-  var exercises = Object.keys(exerciseHistory).filter(function(n){return exerciseHistory[n].length>=2;});
-  if(exercises.length===0) return `<div class="empty"><div class="empty-icon">📈</div><div>Log at least 2 sessions for an exercise to see progress</div></div>`;
+  Object.keys(h).forEach(function(n){ h[n].sort(function(a,b){return new Date(a.date)-new Date(b.date);}); });
+  return h;
+}
 
-  var sel = ST.prChartEx || exercises[0];
-  if(!exerciseHistory[sel]) sel = exercises[0];
-  var data = exerciseHistory[sel];
-  var maxW = Math.max(...data.map(d=>d.weight));
-  var minW = Math.min(...data.map(d=>d.weight));
+function prSortedNames(h) {
+  return Object.keys(h).sort(function(a,b){ return a.toLowerCase().localeCompare(b.toLowerCase()); });
+}
+
+function prResolveSel(h) {
+  var names = prSortedNames(h);
+  if(names.length === 0) return null;
+  return (ST.prChartEx && h[ST.prChartEx]) ? ST.prChartEx : names[0];
+}
+
+function prListHTML(h, q, sel) {
+  var toks = (q||"").toLowerCase().split(/\s+/).filter(Boolean);
+  var names = prSortedNames(h).filter(function(n){
+    var l = n.toLowerCase();
+    return toks.every(function(t){ return l.includes(t); });
+  });
+  if(names.length === 0) return '<div style="padding:12px 10px;font-size:12px;color:var(--muted)">No exercises match "'+prEsc(q)+'"</div>';
+  return names.map(function(n, i){
+    var on = n === sel;
+    var cnt = h[n].length;
+    return '<div data-pr-pick="'+encodeURIComponent(n)+'" style="display:flex;justify-content:space-between;align-items:center;padding:11px 12px;'+(i>0?'border-top:1px solid var(--border);':'')+'cursor:pointer;font-size:13px;'+(on?'color:var(--accent);font-weight:700':'')+'"><span>'+prEsc(n)+'</span><span style="font-size:11px;color:var(--muted);font-weight:400;flex-shrink:0;margin-left:8px">'+cnt+' session'+(cnt===1?'':'s')+'</span></div>';
+  }).join("");
+}
+
+function prChartBodyHTML(h, sel, rangeKey) {
+  var rng = HIST_RANGES.find(function(r){return r.k===rangeKey;}) || HIST_RANGES[4];
+  var all = h[sel] || [];
+  var data = rng.days === null ? all : all.filter(function(d){ return daysAgo(d.date) <= rng.days; });
+
+  var pills = '<div style="display:flex;gap:6px;margin-top:12px">' + HIST_RANGES.map(function(r){
+    var on = r.k === rng.k;
+    return '<button data-pr-range="'+r.k+'" style="flex:1;padding:7px 4px;border-radius:99px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid '+(on?'var(--accent)':'var(--border)')+';background:'+(on?'rgba(79,142,247,.15)':'var(--bg3)')+';color:'+(on?'var(--accent)':'var(--muted)')+'">'+r.label+'</button>';
+  }).join("") + '</div>';
+
+  var head = '<div style="font-weight:700;font-size:14px;margin:14px 0 4px">'+prEsc(sel)+'</div>';
+
+  if(data.length < 2) {
+    return pills + head + '<div style="padding:22px 8px;text-align:center;font-size:13px;color:var(--muted)">Not enough sessions in this range ('+data.length+' logged). Try a longer range.</div>';
+  }
+
+  var maxW = Math.max(...data.map(function(d){return d.weight;}));
+  var minW = Math.min(...data.map(function(d){return d.weight;}));
   var range = maxW - minW || 10;
   var chartH = 140, chartW = 300, pad = 28;
   var pts = data.map(function(d,i){
     var x = pad + (i/(data.length-1||1))*(chartW-pad*2);
     var y = chartH - pad - ((d.weight-minW)/range)*(chartH-pad*2);
-    return {x,y,d};
+    return {x:x, y:y, d:d};
   });
   var pathD = pts.map(function(p,i){return (i===0?"M":"L")+p.x.toFixed(1)+","+p.y.toFixed(1);}).join(" ");
 
-  return `
-  <div class="card" style="padding:12px 14px">
-    <!-- Exercise selector pills -->
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px">
-      ${exercises.map(function(n){
-        var active = n===sel;
-        return `<button data-prchartex="${n}" style="padding:5px 10px;border-radius:99px;font-size:11px;font-weight:700;cursor:pointer;font-family:var(--font-b);border:1px solid ${active?"var(--accent)":"var(--border)"};background:${active?"rgba(79,142,247,.15)":"var(--bg3)"};color:${active?"var(--accent)":"var(--muted)"}">${n}</button>`;
-      }).join("")}
-    </div>
+  var first = data[0].weight, latest = data[data.length-1].weight;
+  var diff = latest - first;
+  var pct = first > 0 ? (diff/first*100) : 0;
+  var diffR = Math.round(diff*10)/10, pctR = Math.round(pct*10)/10;
+  var sign = diff > 0 ? "+" : "";
+  var col = diff > 0 ? "#22c55e" : diff < 0 ? "#ef4444" : "var(--muted)";
 
-    <!-- Chart -->
-    <div style="font-weight:700;font-size:14px;margin-bottom:4px">${sel}</div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${data.length} sessions · PR: ${maxW} lbs · ${data[0].date.slice(5)} → ${data[data.length-1].date.slice(5)}</div>
-    <svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%;overflow:visible">
-      <!-- Grid lines -->
-      ${[0,0.25,0.5,0.75,1].map(function(t){
-        var y = chartH-pad-(t*(chartH-pad*2));
-        var w = Math.round(minW+t*range);
-        return `<line x1="${pad}" y1="${y.toFixed(1)}" x2="${chartW-pad+4}" y2="${y.toFixed(1)}" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
-        <text x="${pad-4}" y="${(y+4).toFixed(1)}" text-anchor="end" font-size="9" fill="rgba(255,255,255,.3)">${w}</text>`;
-      }).join("")}
-      <!-- Line -->
-      <path d="${pathD}" fill="none" stroke="#4f8ef7" stroke-width="2" stroke-linejoin="round"/>
-      <!-- Area fill -->
-      <path d="${pathD} L${pts[pts.length-1].x.toFixed(1)},${chartH-pad} L${pts[0].x.toFixed(1)},${chartH-pad} Z" fill="url(#chartGrad)" opacity="0.3"/>
-      <defs><linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4f8ef7"/><stop offset="100%" stop-color="#4f8ef7" stop-opacity="0"/></linearGradient></defs>
-      <!-- Points -->
-      ${pts.map(function(p,i){
-        var isMax = p.d.weight===maxW;
-        return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${isMax?5:3}" fill="${isMax?"#22c55e":"#4f8ef7"}" stroke="${isMax?"rgba(34,197,94,.3)":"rgba(79,142,247,.3)"}" stroke-width="${isMax?4:2}"/>
-        ${i===data.length-1||isMax?`<text x="${p.x.toFixed(1)}" y="${(p.y-8).toFixed(1)}" text-anchor="middle" font-size="9" fill="${isMax?"#22c55e":"#4f8ef7"}" font-weight="700">${p.d.weight}lbs</text>`:""}`;
-      }).join("")}
-      <!-- X axis dates -->
-      ${pts.filter(function(_,i){return i===0||i===pts.length-1||i===Math.floor(pts.length/2);}).map(function(p){
-        return `<text x="${p.x.toFixed(1)}" y="${chartH-4}" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.3)">${p.d.date.slice(5)}</text>`;
-      }).join("")}
-    </svg>
-    ${data.length>=3?`
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px">
-      <div style="background:var(--bg3);border-radius:var(--rs);padding:8px;text-align:center">
-        <div style="font-size:10px;color:var(--muted)">First</div>
-        <div style="font-weight:700;font-size:16px">${data[0].weight}<span style="font-size:10px;color:var(--muted)">lbs</span></div>
-      </div>
-      <div style="background:var(--bg3);border-radius:var(--rs);padding:8px;text-align:center">
-        <div style="font-size:10px;color:var(--muted)">Latest</div>
-        <div style="font-weight:700;font-size:16px">${data[data.length-1].weight}<span style="font-size:10px;color:var(--muted)">lbs</span></div>
-      </div>
-      <div style="background:var(--bg3);border-radius:var(--rs);padding:8px;text-align:center">
-        <div style="font-size:10px;color:var(--muted)">Progress</div>
-        <div style="font-weight:700;font-size:16px;color:${data[data.length-1].weight>=data[0].weight?"#22c55e":"#ef4444"}">${data[data.length-1].weight>=data[0].weight?"+":""}${(data[data.length-1].weight-data[0].weight).toFixed(1)}<span style="font-size:10px">lbs</span></div>
-      </div>
-    </div>`:""}</div>`;
+  var grid = [0,0.25,0.5,0.75,1].map(function(t){
+    var y = chartH-pad-(t*(chartH-pad*2));
+    var w = Math.round(minW+t*range);
+    return '<line x1="'+pad+'" y1="'+y.toFixed(1)+'" x2="'+(chartW-pad+4)+'" y2="'+y.toFixed(1)+'" stroke="rgba(255,255,255,.06)" stroke-width="1"/><text x="'+(pad-4)+'" y="'+(y+4).toFixed(1)+'" text-anchor="end" font-size="9" fill="rgba(255,255,255,.3)">'+w+'</text>';
+  }).join("");
+  var dots = pts.map(function(p,i){
+    var isMax = p.d.weight === maxW;
+    return '<circle cx="'+p.x.toFixed(1)+'" cy="'+p.y.toFixed(1)+'" r="'+(isMax?5:3)+'" fill="'+(isMax?"#22c55e":"#4f8ef7")+'" stroke="'+(isMax?"rgba(34,197,94,.3)":"rgba(79,142,247,.3)")+'" stroke-width="'+(isMax?4:2)+'"/>'
+      + ((i===data.length-1||isMax)?'<text x="'+p.x.toFixed(1)+'" y="'+(p.y-8).toFixed(1)+'" text-anchor="middle" font-size="9" fill="'+(isMax?"#22c55e":"#4f8ef7")+'" font-weight="700">'+p.d.weight+'lbs</text>':"");
+  }).join("");
+  var xl = pts.filter(function(_,i){return i===0||i===pts.length-1||i===Math.floor(pts.length/2);}).map(function(p){
+    return '<text x="'+p.x.toFixed(1)+'" y="'+(chartH-4)+'" text-anchor="middle" font-size="8" fill="rgba(255,255,255,.3)">'+p.d.date.slice(5)+'</text>';
+  }).join("");
+
+  var card = function(label, value, sub, color) {
+    return '<div style="background:var(--bg3);border-radius:var(--rs);padding:8px;text-align:center"><div style="font-size:10px;color:var(--muted)">'+label+'</div><div style="font-weight:700;font-size:16px;'+(color?'color:'+color:'')+'">'+value+'</div><div style="font-size:10px;color:'+(color||'var(--muted)')+';min-height:13px">'+sub+'</div></div>';
+  };
+
+  return pills + head
+    + '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">'+data.length+' sessions · Best: '+maxW+' lbs · '+data[0].date.slice(5)+' → '+data[data.length-1].date.slice(5)+'</div>'
+    + '<svg viewBox="0 0 '+chartW+' '+chartH+'" style="width:100%;overflow:visible">'
+    + grid
+    + '<path d="'+pathD+'" fill="none" stroke="#4f8ef7" stroke-width="2" stroke-linejoin="round"/>'
+    + '<path d="'+pathD+' L'+pts[pts.length-1].x.toFixed(1)+','+(chartH-pad)+' L'+pts[0].x.toFixed(1)+','+(chartH-pad)+' Z" fill="url(#chartGrad)" opacity="0.3"/>'
+    + '<defs><linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#4f8ef7"/><stop offset="100%" stop-color="#4f8ef7" stop-opacity="0"/></linearGradient></defs>'
+    + dots + xl + '</svg>'
+    + '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:12px">'
+    + card("First", first+'<span style="font-size:10px;color:var(--muted)">lbs</span>', data[0].date.slice(5), "")
+    + card("Latest", latest+'<span style="font-size:10px;color:var(--muted)">lbs</span>', data[data.length-1].date.slice(5), "")
+    + card("Change", sign+diffR+'<span style="font-size:10px">lbs</span>', sign+pctR+'%', col)
+    + '</div>';
+}
+
+function renderProgressCharts() {
+  var h = prBuildExerciseHistory();
+  if(prSortedNames(h).length === 0) {
+    return '<div class="empty"><div class="empty-icon">📈</div><div>Log weights for an exercise to see progress</div></div>';
+  }
+  var sel = prResolveSel(h);
+  var rangeKey = S.get("pr_range", "ALL");
+  return '<div id="pr-charts-root"><div class="card" style="padding:12px 14px">'
+    + '<button id="pr-ex-field" style="width:100%;height:44px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--rs);color:var(--text);font-family:var(--font-b);font-size:14px;font-weight:700;cursor:pointer;text-align:left">'
+    +   '<span id="pr-ex-label" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+prEsc(sel)+'</span><span id="pr-ex-caret" style="color:var(--muted);flex-shrink:0;margin-left:8px">⌄</span></button>'
+    + '<div id="pr-ex-panel" style="display:none;margin-top:8px">'
+    +   '<input id="pr-ex-search" class="finput" placeholder="Type to search exercises…" autocomplete="off" style="margin-bottom:6px">'
+    +   '<div id="pr-ex-list" style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--rs)">'+prListHTML(h, "", sel)+'</div>'
+    + '</div>'
+    + '<div id="pr-chart-body">'+prChartBodyHTML(h, sel, rangeKey)+'</div>'
+    + '</div></div>';
 }
 
 function renderHistory() {
@@ -5064,14 +5195,44 @@ function attachAll() {
   $$("[data-prview]").forEach(el=>el.addEventListener("click",()=>{
     ST.prView=el.dataset.prview; render();
   }));
-  // EXERCISE CHART SELECTOR
-  $$("[data-prchartex]").forEach(el=>el.addEventListener("click",e=>{
-    e.stopPropagation();
-    ST.prChartEx=el.dataset.prchartex;
-    var pg=document.getElementById("pg"); var sy=pg?pg.scrollTop:0;
-    render();
-    requestAnimationFrame(function(){ var pg2=document.getElementById("pg"); if(pg2) pg2.scrollTop=sy; });
-  }));
+  // PROGRESS CHARTS — dropdown, search, range pills (surgical: never re-renders the page)
+  var prRoot = document.getElementById("pr-charts-root");
+  if(prRoot) {
+    prRoot.addEventListener("click", function(e){
+      var h = prBuildExerciseHistory();
+      if(e.target.closest("#pr-ex-field")) {
+        var panel = document.getElementById("pr-ex-panel");
+        var wasOpen = panel.style.display !== "none";
+        panel.style.display = wasOpen ? "none" : "block";
+        var caret = document.getElementById("pr-ex-caret"); if(caret) caret.textContent = wasOpen ? "⌄" : "⌃";
+        if(!wasOpen) { var si = document.getElementById("pr-ex-search"); if(si) si.focus(); }
+        return;
+      }
+      var pick = e.target.closest("[data-pr-pick]");
+      if(pick) {
+        var name = decodeURIComponent(pick.dataset.prPick);
+        if(!h[name]) return;
+        ST.prChartEx = name;
+        var si2 = document.getElementById("pr-ex-search"); if(si2) si2.value = "";
+        document.getElementById("pr-ex-label").textContent = name;
+        document.getElementById("pr-ex-panel").style.display = "none";
+        document.getElementById("pr-ex-caret").textContent = "⌄";
+        document.getElementById("pr-ex-list").innerHTML = prListHTML(h, "", name);
+        document.getElementById("pr-chart-body").innerHTML = prChartBodyHTML(h, name, S.get("pr_range", "ALL"));
+        return;
+      }
+      var rg = e.target.closest("[data-pr-range]");
+      if(rg) {
+        S.set("pr_range", rg.dataset.prRange);
+        document.getElementById("pr-chart-body").innerHTML = prChartBodyHTML(h, prResolveSel(h), rg.dataset.prRange);
+      }
+    });
+    var prSearch = document.getElementById("pr-ex-search");
+    if(prSearch) prSearch.addEventListener("input", function(){
+      var h = prBuildExerciseHistory();
+      document.getElementById("pr-ex-list").innerHTML = prListHTML(h, prSearch.value, prResolveSel(h));
+    });
+  }
 
   // WORKOUT VIEW TOGGLE (Log / PRs / back to plan)
   $$("[data-wview]").forEach(el=>el.addEventListener("click",()=>{
@@ -5506,6 +5667,9 @@ document.addEventListener("click", function(e) {
   // Tempo explanation popup
   var tempoEl = e.target.closest("[data-tempo]");
   if(tempoEl) { e.stopPropagation(); ST.tempoPopup=tempoEl.dataset.tempo; render(); return; }
+  // EXERCISE HISTORY sheet
+  var histBtn = e.target.closest("[data-open-history]");
+  if(histBtn) { e.stopPropagation(); openHistorySheet(histBtn.dataset.openHistory, histBtn.dataset.histName); return; }
   // START DAY — here so it never accumulates duplicate listeners
   var startDayEl = e.target.closest("[data-start-day]");
   if(startDayEl) {
